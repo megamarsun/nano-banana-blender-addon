@@ -3,6 +3,7 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from bpy.props import StringProperty, BoolProperty, EnumProperty, IntProperty
 from bpy.types import AddonPreferences, Operator, Panel, PropertyGroup
+from bpy.app.translations import pgettext_iface as _
 
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent"
 
@@ -14,8 +15,11 @@ _NB_HANDLER_REGISTERED = False  # render_write ハンドラ重複登録防止
 # =========================================================
 # Add-on Preferences
 # =========================================================
+ADDON_NAME = __package__ if __package__ else __name__
+
+
 class NBPreferences(AddonPreferences):
-    bl_idname = __name__
+    bl_idname = ADDON_NAME
     api_key: StringProperty(
         name="Gemini API Key",
         description="Google AI StudioのAPIキー",
@@ -268,7 +272,7 @@ def _nb_on_render_write(scene):
         return
 
     # APIキー確認
-    prefs = bpy.context.preferences.addons[__name__].preferences
+    prefs = bpy.context.preferences.addons[ADDON_NAME].preferences
     api_key = (prefs.api_key or "").strip()
     if not api_key:
         nb_log(scene, "ERROR", "APIキー未設定。Auto処理をスキップ")
@@ -327,7 +331,7 @@ class NB_OT_Run(Operator):
 
     def execute(self, ctx):
         scene = ctx.scene
-        prefs = ctx.preferences.addons[__name__].preferences
+        prefs = ctx.preferences.addons[ADDON_NAME].preferences
         props = scene.nb_props
 
         api_key = (prefs.api_key or "").strip()
@@ -464,17 +468,17 @@ class NB_PT_Panel(Panel):
         layout = self.layout
 
         box = layout.box()
-        box.label(text="Mode")
+        box.label(text=_("Mode"))
         box.prop(p, "mode", expand=True)
 
         col = layout.column(align=True)
         if p.mode == 'COMPOSE':
-            col.label(text="References (up to 2)")
+            col.label(text=_("References (up to 2)"))
             col.prop(p, "input_path_b")
             col.prop(p, "input_path_c")
 
         layout.separator()
-        layout.label(text="Render (Base) - required")
+        layout.label(text=_("Render (Base) - required"))
         layout.prop(p, "input_path")
 
         layout.separator()
@@ -482,23 +486,23 @@ class NB_PT_Panel(Panel):
 
         layout.separator()
         col = layout.column(align=True)
-        col.label(text="Manual Run")
+        col.label(text=_("Manual Run"))
         col.prop(p, "output_path")
         col.prop(p, "open_in_image_editor")
         col.operator("nb.run_edit", icon='PLAY')
 
         layout.separator()
         col = layout.box().column(align=True)
-        col.label(text="Auto Run on Render (per-frame)")
+        col.label(text=_("Auto Run on Render (per-frame)"))
         row = col.row(align=True)
-        row.prop(p, "auto_on_render", text="Enabled")
-        on = col.operator("nb.toggle_auto_on_render", text="Apply", icon='CHECKMARK')
+        row.prop(p, "auto_on_render", text=_("Enabled"))
+        on = col.operator("nb.toggle_auto_on_render", text=_("Apply"), icon='CHECKMARK')
         on.enable = p.auto_on_render
         col.prop(p, "auto_out_dir")
 
         layout.separator()
         col = layout.box().column(align=True)
-        col.label(text="Limiter")
+        col.label(text=_("Limiter"))
         col.prop(p, "limit_enabled")
         row = col.row(align=True)
         row.prop(p, "limit_max")
@@ -507,19 +511,19 @@ class NB_PT_Panel(Panel):
 
         layout.separator()
         box = layout.box()
-        box.label(text="Logs")
+        box.label(text=_("Logs"))
         row = box.row()
-        row.prop(p, "verbose", text="Verbose")
+        row.prop(p, "verbose", text=_("Verbose"))
         row = box.row(align=True)
-        row.prop(p, "log_dir", text="Log Dir")
+        row.prop(p, "log_dir", text=_("Log Dir"))
         if p.last_info:
-            box.label(text=f"Last Info: {p.last_info[-80:]}", icon='INFO')
+            box.label(text=_("Last Info: ") + p.last_info[-80:], icon='INFO')
         if p.last_error:
-            box.label(text=f"Last Error: {p.last_error[-80:]}", icon='ERROR')
+            box.label(text=_("Last Error: ") + p.last_error[-80:], icon='ERROR')
         row = box.row(align=True)
-        op = row.operator("nb.show_last_log", text="Show Last Info", icon='INFO')
+        op = row.operator("nb.show_last_log", text=_("Show Last Info"), icon='INFO')
         op.kind = 'INFO'
-        op = row.operator("nb.show_last_log", text="Show Last Error", icon='ERROR')
+        op = row.operator("nb.show_last_log", text=_("Show Last Error"), icon='ERROR')
         op.kind = 'ERROR'
 
 # =========================================================
