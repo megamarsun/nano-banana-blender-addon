@@ -1,0 +1,7 @@
+schema_version = "1.0.0"
+id = "nano_banana"
+name = "Nano-Banana (Gemini 2.5 Flash Image) Editor"
+version = "0.4.0"
+type = "add-on"
+maintainers = ["あなた"]
+blender_version_min = "4.3.0"
