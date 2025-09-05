@@ -1,0 +1,11 @@
+# blender_manifest.toml
+# ref: FreePencil2 manifest を参照 :contentReference[oaicite:0]{index=0}
+schema_version = "1.1.0"
+id = "nano_banana"
+version = "0.5.0"
+name = "Nano-Banana (Gemini Image) Editor"
+type = "add-on"
+blender_version_min = "4.3.0"
+license = ["MIT"]
+permissions = ["network"]
+

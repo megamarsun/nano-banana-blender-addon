@@ -1,3 +1,4 @@
+# ref: README の注意点により bl_info は __init__.py のみに置く想定 :contentReference[oaicite:2]{index=2}
 import bpy, os, json, base64, datetime
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
@@ -15,11 +16,11 @@ _NB_HANDLER_REGISTERED = False  # render_write ハンドラ重複登録防止
 # =========================================================
 # Add-on Preferences
 # =========================================================
-ADDON_NAME = __package__ if __package__ else __name__
+ADDON_NAME = "nano_banana"
 
 
 class NBPreferences(AddonPreferences):
-    bl_idname = ADDON_NAME
+    bl_idname = "nano_banana"
     api_key: StringProperty(
         name="Gemini API Key",
         description="Google AI StudioのAPIキー",
