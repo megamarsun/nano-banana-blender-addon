@@ -8,4 +8,4 @@ license = "GPL-3.0-or-later"
 maintainers = ["あなた"]
 
 [addon]
-module = "__init__"
+module = "nano_banana_addon"
