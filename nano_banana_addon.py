@@ -15,11 +15,11 @@ _NB_HANDLER_REGISTERED = False  # render_write ハンドラ重複登録防止
 # =========================================================
 # Add-on Preferences
 # =========================================================
-ADDON_NAME = __package__ if __package__ else __name__
+ADDON_NAME = "nano_banana"
 
 
 class NBPreferences(AddonPreferences):
-    bl_idname = ADDON_NAME
+    bl_idname = "nano_banana"
     api_key: StringProperty(
         name="Gemini API Key",
         description="Google AI StudioのAPIキー",
