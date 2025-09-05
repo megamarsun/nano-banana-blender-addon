@@ -1,8 +1,22 @@
-"""Compatibility shim for the Nano-Banana Blender add-on.
+bl_info = {
+    "name": "Nano-Banana (Gemini 2.5 Flash Image) Editor",
+    "author": "あなた",
+    "version": (0, 4, 0),
+    "blender": (4, 0, 0),
+    "location": "Image Editor > Nパネル > Nano-Banana",
+    "description": "Gemini 2.5 Flash Image(API)で参照×2+レンダ(最後)を編集。レンダ完了で自動実行/連番保存。ログ強化＆リミッター付",
+    "category": "Image",
+}
 
-This file exists so developer tools that assume the legacy add-on layout
-(find an ``__init__`` at the repository root) can locate the actual
-implementation, which lives in :mod:`nano_banana`.
-"""
+from nano_banana_addon import register as _r, unregister as _u
+import i18n
 
-from nano_banana import bl_info, register, unregister  # noqa: F401
+
+def register():
+    i18n.register()
+    _r()
+
+
+def unregister():
+    _u()
+    i18n.unregister()
