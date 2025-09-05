@@ -14,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MODULE_NAME = "nano_banana"
+PACKAGE_DIR = ROOT / MODULE_NAME
 OUTPUT_ZIP = ROOT / f"{MODULE_NAME}.zip"
 
 # Non-binary files to include at the archive root (e.g. manifest, icons).
@@ -31,8 +32,8 @@ def purge_compiled() -> None:
 def build_zip() -> None:
     """Create a zip archive containing the add-on and extension metadata."""
     with zipfile.ZipFile(OUTPUT_ZIP, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for py_file in ROOT.glob("*.py"):
-            zf.write(py_file, py_file.name)
+        for py_file in PACKAGE_DIR.rglob("*.py"):
+            zf.write(py_file, py_file.relative_to(ROOT))
 
         for extra in EXTRA_FILES:
             if extra.exists():

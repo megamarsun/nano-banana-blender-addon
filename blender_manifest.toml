@@ -1,11 +1,9 @@
 schema_version = "1.0.0"
-id = "nano-banana"
-version = "0.4.0"
-name = "Nano-Banana (Gemini 2.5 Flash Image) Editor"
-type = "add-on"
-blender_version_min = "4.0.0"
-license = "GPL-3.0-or-later"
-maintainers = ["あなた"]
 
-[addon]
-module = "nano_banana_addon"
+id = "jp.sakaki.nano_banana"
+name = "Nano-Banana (Gemini Image) Editor"
+version = "0.5.0"
+type = "add-on"
+blender_version_min = "4.3.0"
+
+modules = ["nano_banana"]
