@@ -16,6 +16,10 @@ ROOT = Path(__file__).parent
 SRC_DIR = ROOT / "nano_banana"
 OUTPUT_ZIP = ROOT / "nano_banana.zip"
 
+# Additional non-binary files that should be packaged alongside the add-on
+# for Blender's extension system (e.g. manifest, icons).
+EXTRA_FILES = [ROOT / "blender_manifest.toml"]
+
 
 def purge_compiled() -> None:
     """Remove ``__pycache__`` directories and ``*.pyc`` files."""
@@ -26,13 +30,17 @@ def purge_compiled() -> None:
 
 
 def build_zip() -> None:
-    """Create a zip archive containing only sources under ``nano_banana``."""
+    """Create a zip archive containing the add-on and extension metadata."""
     with zipfile.ZipFile(OUTPUT_ZIP, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for file in SRC_DIR.rglob("*"):
             if file.is_dir():
                 continue
             arcname = file.relative_to(ROOT)
             zf.write(file, arcname)
+
+        for extra in EXTRA_FILES:
+            if extra.exists():
+                zf.write(extra, extra.name)
 
 
 def main() -> None:
