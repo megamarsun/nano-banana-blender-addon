@@ -1,0 +1,11 @@
+schema_version = "1.0.0"
+id = "jp.sakaki.nano_banana"
+version = "0.5.0"
+name = "Nano-Banana (Gemini Image) Editor"
+type = "add-on"
+maintainer = "Masamune Sakaki <example@example.com>"
+blender_version_min = "4.3.0"
+license = ["SPDX:MIT"]
+
+[permissions]
+network = "Gemini APIにアクセスするため"

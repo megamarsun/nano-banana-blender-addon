@@ -4,6 +4,7 @@ from urllib.error import URLError, HTTPError
 from bpy.props import StringProperty, BoolProperty, EnumProperty, IntProperty
 from bpy.types import AddonPreferences, Operator, Panel, PropertyGroup
 from bpy.app.translations import pgettext_iface as _
+from bpy.utils import extension_path_user
 
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent"
 
@@ -15,11 +16,11 @@ _NB_HANDLER_REGISTERED = False  # render_write ハンドラ重複登録防止
 # =========================================================
 # Add-on Preferences
 # =========================================================
-ADDON_NAME = __package__ if __package__ else __name__
+ADDON_NAME = "nano_banana"
 
 
 class NBPreferences(AddonPreferences):
-    bl_idname = ADDON_NAME
+    bl_idname = "nano_banana"
     api_key: StringProperty(
         name="Gemini API Key",
         description="Google AI StudioのAPIキー",
@@ -90,7 +91,7 @@ class NBProps(PropertyGroup):
     auto_out_dir: StringProperty(
         name="Auto Output Dir",
         description="レンダ連動の保存先フォルダ（例: //nb_out）",
-        default="//nb_out",
+        default="",
         subtype='DIR_PATH'
     )
 
@@ -129,7 +130,7 @@ class NBProps(PropertyGroup):
     )
     log_dir: StringProperty(
         name="Log Dir",
-        description="ログファイル(nb_log.txt)の保存先（未指定なら //nb_out ）",
+        description="ログファイル(nb_log.txt)の保存先（未指定なら extension path ）",
         default="",
         subtype='DIR_PATH'
     )
@@ -148,7 +149,7 @@ def _log_write_to_textblock(line: str):
 def _log_write_to_file(path_dir: str, line: str):
     try:
         if not path_dir:
-            path_dir = bpy.path.abspath("//nb_out")
+            path_dir = extension_path_user(__package__, create=True)
         os.makedirs(path_dir, exist_ok=True)
         with open(os.path.join(path_dir, "nb_log.txt"), "a", encoding="utf-8") as f:
             f.write(line + "\n")
@@ -280,7 +281,7 @@ def _nb_on_render_write(scene):
 
     # 保存先準備
     frame = scene.frame_current
-    base_dir = bpy.path.abspath(props.auto_out_dir) if props.auto_out_dir else bpy.path.abspath("//nb_out")
+    base_dir = bpy.path.abspath(props.auto_out_dir) if props.auto_out_dir else extension_path_user(__package__, create=True)
     in_dir = os.path.join(base_dir, "in")
     out_dir = os.path.join(base_dir, "out")
     _ensure_dir(in_dir); _ensure_dir(out_dir)
@@ -358,8 +359,7 @@ class NB_OT_Run(Operator):
         # 保存パス（手動）
         out_path = _abs(props.output_path).strip()
         if not out_path:
-            base_dir = os.path.dirname(in_a) if os.path.dirname(in_a) else bpy.path.abspath("//")
-            out_dir = base_dir; os.makedirs(out_dir, exist_ok=True)
+            out_dir = extension_path_user(__package__, create=True)
             out_path = os.path.join(out_dir, "nb_out.png")
         else:
             is_dir_like = out_path.endswith(("/", "\\")) or os.path.isdir(out_path) or (os.path.splitext(out_path)[1] == "")
@@ -368,7 +368,10 @@ class NB_OT_Run(Operator):
                 _ensure_dir(out_dir)
                 out_path = os.path.join(out_dir, "nb_out.png")
             else:
-                out_dir = os.path.dirname(out_path) or bpy.path.abspath("//")
+                out_dir = os.path.dirname(out_path)
+                if not out_dir:
+                    out_dir = extension_path_user(__package__, create=True)
+                    out_path = os.path.join(out_dir, os.path.basename(out_path))
                 _ensure_dir(out_dir)
 
         try:
