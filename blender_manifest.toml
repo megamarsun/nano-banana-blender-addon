@@ -6,3 +6,6 @@ type = "add-on"
 blender_version_min = "4.0.0"
 license = "GPL-3.0-or-later"
 maintainers = ["あなた"]
+
+[addon]
+module = "nano_banana"
