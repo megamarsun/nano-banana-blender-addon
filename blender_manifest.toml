@@ -1,7 +1,13 @@
 schema_version = "1.0.0"
 id = "nano_banana"
-name = "Nano-Banana (Gemini 2.5 Flash Image) Editor"
 version = "0.4.0"
+name = "Nano-Banana (Gemini Image) Editor"
+tagline = "Refs x2 + Render edit with logs/limiter"
+maintainer = "Masamune Sakaki <sakaki@example.com>"
 type = "add-on"
-maintainers = ["あなた"]
 blender_version_min = "4.3.0"
+license = ["MIT"]
+
+[permissions]
+network = "Call Google Gemini API from Blender"
+files = "Read refs/render images and write logs/outputs"
