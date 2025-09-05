@@ -3,6 +3,12 @@
 BlenderからGemini 2.5 Flash Image（nano-banana）を叩くアドオン。
 EDIT（単一編集）/ COMPOSE（2枚合成）対応。
 
+## インストール
+
+Blender の拡張機能ディレクトリに配置する際は、このリポジトリのルートフォルダ
+`nano-banana-blender-addon` を `nano_banana` にリネームしてからコピーします。
+フォルダ直下には `__init__.py` と `blender_manifest.toml` が存在する必要があります。
+
 ## Release
 
 `python build_release.py` を実行すると、Git管理情報や `README.md` を含まない
