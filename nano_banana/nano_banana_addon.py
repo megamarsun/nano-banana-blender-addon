@@ -1,4 +1,4 @@
-import bpy, os, json, base64, datetime
+import bpy, os, json, base64, datetime, threading, blf
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from bpy.props import StringProperty, BoolProperty, EnumProperty, IntProperty
@@ -329,69 +329,120 @@ class NB_OT_Run(Operator):
     bl_label = "Run nano-banana (manual)"
     bl_description = "参照→参照→レンダの順でAPI実行して保存"
 
-    def execute(self, ctx):
+    _timer = None
+    _handle = None
+    _thread = None
+    _data = None
+    _error = None
+    _counter = 0
+    _mx = 0
+    _my = 0
+
+    def _call_api(self):
+        try:
+            self._data = _run_nano_banana(self.api_key, self.prompt, self.ref1, self.ref2, self.in_a)
+        except Exception as e:
+            self._error = e
+
+    def _draw_loading(self, ctx):
+        blf.position(0, self._mx, self._my, 0)
+        blf.size(0, 20, 72)
+        blf.draw(0, str(self._counter))
+
+    def invoke(self, ctx, event):
         scene = ctx.scene
         prefs = ctx.preferences.addons[ADDON_NAME].preferences
         props = scene.nb_props
 
-        api_key = (prefs.api_key or "").strip()
-        if not api_key:
+        self.api_key = (prefs.api_key or "").strip()
+        if not self.api_key:
             self.report({'ERROR'}, "APIキー未設定（Edit > Preferences > Add-ons で設定）")
             nb_log(scene, "ERROR", "APIキー未設定（手動）")
             return {'CANCELLED'}
 
-        in_a = _abs(props.input_path)  # Render(Base)
-        ref1 = _abs(props.input_path_b) if props.input_path_b else ""
-        ref2 = _abs(props.input_path_c) if props.input_path_c else ""
+        self.in_a = _abs(props.input_path)
+        self.ref1 = _abs(props.input_path_b) if props.input_path_b else ""
+        self.ref2 = _abs(props.input_path_c) if props.input_path_c else ""
+        self.prompt = props.prompt
 
-        try:
-            data = _run_nano_banana(api_key, props.prompt, ref1, ref2, in_a)
-        except FileNotFoundError as e:
-            self.report({'ERROR'}, str(e))
-            nb_log(scene, "ERROR", f"{e}")
-            return {'CANCELLED'}
-        except Exception as e:
-            self.report({'ERROR'}, f"{e}")
-            nb_log(scene, "ERROR", f"{e}")
-            return {'CANCELLED'}
-
-        # 保存パス（手動）
         out_path = _abs(props.output_path).strip()
         if not out_path:
-            base_dir = os.path.dirname(in_a) if os.path.dirname(in_a) else bpy.path.abspath("//")
+            base_dir = os.path.dirname(self.in_a) if os.path.dirname(self.in_a) else bpy.path.abspath("//")
             out_dir = base_dir; os.makedirs(out_dir, exist_ok=True)
-            out_path = os.path.join(out_dir, "nb_out.png")
+            self.out_path = os.path.join(out_dir, "nb_out.png")
         else:
             is_dir_like = out_path.endswith(("/", "\\")) or os.path.isdir(out_path) or (os.path.splitext(out_path)[1] == "")
             if is_dir_like:
                 out_dir = out_path.rstrip("/\\")
                 _ensure_dir(out_dir)
-                out_path = os.path.join(out_dir, "nb_out.png")
+                self.out_path = os.path.join(out_dir, "nb_out.png")
             else:
                 out_dir = os.path.dirname(out_path) or bpy.path.abspath("//")
                 _ensure_dir(out_dir)
+                self.out_path = out_path
 
-        try:
-            with open(out_path, "wb") as f:
-                f.write(data)
-        except Exception as e:
-            self.report({'ERROR'}, f"保存に失敗: {e}")
-            nb_log(scene, "ERROR", f"保存に失敗: {e}")
-            return {'CANCELLED'}
+        self.open_in_image_editor = props.open_in_image_editor
 
-        if props.open_in_image_editor:
-            try:
-                img = bpy.data.images.load(out_path, check_existing=True)
-                for area in ctx.screen.areas:
-                    if area.type == 'IMAGE_EDITOR':
-                        area.spaces.active.image = img
-                        break
-            except Exception:
-                pass
+        self._mx = event.mouse_region_x
+        self._my = event.mouse_region_y
+        self._counter = 0
 
-        self.report({'INFO'}, f"保存: {out_path}")
-        nb_log(scene, "INFO", f"保存: {out_path}")
-        return {'FINISHED'}
+        wm = ctx.window_manager
+        self._timer = wm.event_timer_add(0.1, window=ctx.window)
+        self._handle = bpy.types.SpaceImageEditor.draw_handler_add(self._draw_loading, (ctx,), 'WINDOW', 'POST_PIXEL')
+        wm.modal_handler_add(self)
+
+        self._data = None
+        self._error = None
+        self._thread = threading.Thread(target=self._call_api)
+        self._thread.start()
+        return {'RUNNING_MODAL'}
+
+    def modal(self, ctx, event):
+        if event.type == 'MOUSEMOVE':
+            self._mx = event.mouse_region_x
+            self._my = event.mouse_region_y
+
+        if event.type == 'TIMER':
+            self._counter = (self._counter + 1) % 1000
+            if not self._thread.is_alive():
+                self._finish_loading(ctx)
+                if self._error:
+                    self.report({'ERROR'}, f"{self._error}")
+                    nb_log(ctx.scene, "ERROR", f"{self._error}")
+                    return {'CANCELLED'}
+                try:
+                    with open(self.out_path, "wb") as f:
+                        f.write(self._data)
+                except Exception as e:
+                    self.report({'ERROR'}, f"保存に失敗: {e}")
+                    nb_log(ctx.scene, "ERROR", f"保存に失敗: {e}")
+                    return {'CANCELLED'}
+
+                if self.open_in_image_editor:
+                    try:
+                        img = bpy.data.images.load(self.out_path, check_existing=True)
+                        for area in ctx.screen.areas:
+                            if area.type == 'IMAGE_EDITOR':
+                                area.spaces.active.image = img
+                                break
+                    except Exception:
+                        pass
+
+                self.report({'INFO'}, f"保存: {self.out_path}")
+                nb_log(ctx.scene, "INFO", f"保存: {self.out_path}")
+                return {'FINISHED'}
+            ctx.area.tag_redraw()
+        return {'RUNNING_MODAL'}
+
+    def _finish_loading(self, ctx):
+        wm = ctx.window_manager
+        if self._timer:
+            wm.event_timer_remove(self._timer)
+            self._timer = None
+        if self._handle:
+            bpy.types.SpaceImageEditor.draw_handler_remove(self._handle, 'WINDOW')
+            self._handle = None
 
 class NB_OT_ToggleAuto(Operator):
     bl_idname = "nb.toggle_auto_on_render"
