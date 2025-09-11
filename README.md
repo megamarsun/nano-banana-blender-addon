@@ -24,3 +24,7 @@ EDIT（単一編集）/ COMPOSE（2枚合成）対応。
 }
 ```
 
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+

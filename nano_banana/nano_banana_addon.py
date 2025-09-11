@@ -2,27 +2,44 @@ import bpy, os, json, base64, datetime, threading, queue, re
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from bpy.props import StringProperty, BoolProperty, EnumProperty
-from bpy.types import AddonPreferences, Operator, Panel, PropertyGroup
+from bpy.types import Operator, Panel, PropertyGroup
 from bpy.app.translations import pgettext_iface as _
+
+# Try to use ExtensionPreferences when available (Blender 4.2+),
+# otherwise fall back to AddonPreferences for older Blender versions.
+BasePreferences = getattr(bpy.types, "ExtensionPreferences", bpy.types.AddonPreferences)
 
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent"
 
 # =========================================================
-# Add-on Preferences
+# Preferences
 # =========================================================
 ADDON_NAME = __package__ if __package__ else __name__
 
 
-class NBPreferences(AddonPreferences):
-    bl_idname = ADDON_NAME
+class NBPreferences(BasePreferences):
+    if BasePreferences.__name__ == "ExtensionPreferences":
+        bl_extension_idname = ADDON_NAME
+    else:
+        bl_idname = ADDON_NAME
+
     api_key: StringProperty(
         name="Gemini API Key",
         description="Google AI StudioのAPIキー",
         subtype='PASSWORD'
     )
+
     def draw(self, ctx):
         col = self.layout.column()
         col.prop(self, "api_key")
+
+
+def _get_preferences(ctx):
+    """Return extension preferences when available, else add-on preferences."""
+    exts = getattr(ctx.preferences, "extensions", None)
+    if exts and ADDON_NAME in exts:
+        return exts[ADDON_NAME].preferences
+    return ctx.preferences.addons[ADDON_NAME].preferences
 
 # =========================================================
 # Scene Properties
@@ -260,12 +277,12 @@ class NB_OT_Run(Operator):
 
     def invoke(self, ctx, event):
         scene = ctx.scene
-        prefs = ctx.preferences.addons[ADDON_NAME].preferences
+        prefs = _get_preferences(ctx)
         props = scene.nb_props
 
         api_key = (prefs.api_key or "").strip()
         if not api_key:
-            self.report({'ERROR'}, "APIキー未設定（Edit > Preferences > Add-ons で設定）")
+            self.report({'ERROR'}, "APIキー未設定（Edit > Preferences > Extensions で設定）")
             nb_log(scene, "ERROR", "APIキー未設定（手動）")
             return {'CANCELLED'}
 
