@@ -1,4 +1,4 @@
-import bpy, os, json, base64, datetime
+import bpy, os, json, base64, datetime, threading
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from bpy.props import StringProperty, BoolProperty, EnumProperty, IntProperty
@@ -132,6 +132,10 @@ class NBProps(PropertyGroup):
         description="ログファイル(nb_log.txt)の保存先（未指定なら //nb_out ）",
         default="",
         subtype='DIR_PATH'
+    )
+    is_running: BoolProperty(
+        name="Is Running",
+        default=False,
     )
 
 # =========================================================
@@ -330,6 +334,9 @@ class NB_OT_Run(Operator):
     bl_description = "参照→参照→レンダの順でAPI実行して保存"
 
     def execute(self, ctx):
+        return self.invoke(ctx, None)
+
+    def invoke(self, ctx, event):
         scene = ctx.scene
         prefs = ctx.preferences.addons[ADDON_NAME].preferences
         props = scene.nb_props
@@ -344,18 +351,6 @@ class NB_OT_Run(Operator):
         ref1 = _abs(props.input_path_b) if props.input_path_b else ""
         ref2 = _abs(props.input_path_c) if props.input_path_c else ""
 
-        try:
-            data = _run_nano_banana(api_key, props.prompt, ref1, ref2, in_a)
-        except FileNotFoundError as e:
-            self.report({'ERROR'}, str(e))
-            nb_log(scene, "ERROR", f"{e}")
-            return {'CANCELLED'}
-        except Exception as e:
-            self.report({'ERROR'}, f"{e}")
-            nb_log(scene, "ERROR", f"{e}")
-            return {'CANCELLED'}
-
-        # 保存パス（手動）
         out_path = _abs(props.output_path).strip()
         if not out_path:
             base_dir = os.path.dirname(in_a) if os.path.dirname(in_a) else bpy.path.abspath("//")
@@ -371,17 +366,54 @@ class NB_OT_Run(Operator):
                 out_dir = os.path.dirname(out_path) or bpy.path.abspath("//")
                 _ensure_dir(out_dir)
 
-        try:
-            with open(out_path, "wb") as f:
-                f.write(data)
-        except Exception as e:
-            self.report({'ERROR'}, f"保存に失敗: {e}")
-            nb_log(scene, "ERROR", f"保存に失敗: {e}")
+        self._data = None
+        self._error = None
+        self._out_path = out_path
+        self._open_in_image_editor = props.open_in_image_editor
+
+        def _target():
+            try:
+                self._data = _run_nano_banana(api_key, props.prompt, ref1, ref2, in_a)
+            except Exception as e:
+                self._error = e
+
+        self._thread = threading.Thread(target=_target, daemon=True)
+        self._thread.start()
+
+        props.is_running = True
+
+        wm = ctx.window_manager
+        wm.cursor_modal_set('WAIT')
+        wm.progress_begin(0, 100)
+        wm.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def modal(self, ctx, event):
+        if self._thread.is_alive():
+            return {'RUNNING_MODAL'}
+
+        wm = ctx.window_manager
+        wm.progress_end()
+        wm.cursor_modal_restore()
+        props = ctx.scene.nb_props
+        props.is_running = False
+
+        if self._error:
+            self.report({'ERROR'}, f"{self._error}")
+            nb_log(ctx.scene, "ERROR", f"{self._error}")
             return {'CANCELLED'}
 
-        if props.open_in_image_editor:
+        try:
+            with open(self._out_path, "wb") as f:
+                f.write(self._data)
+        except Exception as e:
+            self.report({'ERROR'}, f"保存に失敗: {e}")
+            nb_log(ctx.scene, "ERROR", f"保存に失敗: {e}")
+            return {'CANCELLED'}
+
+        if self._open_in_image_editor:
             try:
-                img = bpy.data.images.load(out_path, check_existing=True)
+                img = bpy.data.images.load(self._out_path, check_existing=True)
                 for area in ctx.screen.areas:
                     if area.type == 'IMAGE_EDITOR':
                         area.spaces.active.image = img
@@ -389,8 +421,8 @@ class NB_OT_Run(Operator):
             except Exception:
                 pass
 
-        self.report({'INFO'}, f"保存: {out_path}")
-        nb_log(scene, "INFO", f"保存: {out_path}")
+        self.report({'INFO'}, f"保存: {self._out_path}")
+        nb_log(ctx.scene, "INFO", f"保存: {self._out_path}")
         return {'FINISHED'}
 
 class NB_OT_ToggleAuto(Operator):
@@ -489,7 +521,11 @@ class NB_PT_Panel(Panel):
         col.label(text=_("Manual Run"))
         col.prop(p, "output_path")
         col.prop(p, "open_in_image_editor")
-        col.operator("nb.run_edit", icon='PLAY')
+        row = col.row()
+        row.enabled = not p.is_running
+        row.operator("nb.run_edit", icon='PLAY')
+        if p.is_running:
+            col.label(text=_("Generating..."))
 
         layout.separator()
         col = layout.box().column(align=True)
