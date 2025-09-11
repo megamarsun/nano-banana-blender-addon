@@ -2,24 +2,25 @@ import bpy, os, json, base64, datetime, threading, queue, re
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from bpy.props import StringProperty, BoolProperty, EnumProperty
-from bpy.types import AddonPreferences, Operator, Panel, PropertyGroup
+from bpy.types import ExtensionPreferences, Operator, Panel, PropertyGroup
 from bpy.app.translations import pgettext_iface as _
 
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent"
 
 # =========================================================
-# Add-on Preferences
+# Extension Preferences
 # =========================================================
 ADDON_NAME = __package__ if __package__ else __name__
 
 
-class NBPreferences(AddonPreferences):
-    bl_idname = ADDON_NAME
+class NBExtensionPreferences(ExtensionPreferences):
+    bl_extension_idname = ADDON_NAME
     api_key: StringProperty(
         name="Gemini API Key",
         description="Google AI StudioのAPIキー",
         subtype='PASSWORD'
     )
+
     def draw(self, ctx):
         col = self.layout.column()
         col.prop(self, "api_key")
@@ -260,12 +261,12 @@ class NB_OT_Run(Operator):
 
     def invoke(self, ctx, event):
         scene = ctx.scene
-        prefs = ctx.preferences.addons[ADDON_NAME].preferences
+        prefs = ctx.preferences.extensions[ADDON_NAME].preferences
         props = scene.nb_props
 
         api_key = (prefs.api_key or "").strip()
         if not api_key:
-            self.report({'ERROR'}, "APIキー未設定（Edit > Preferences > Add-ons で設定）")
+            self.report({'ERROR'}, "APIキー未設定（Edit > Preferences > Extensions で設定）")
             nb_log(scene, "ERROR", "APIキー未設定（手動）")
             return {'CANCELLED'}
 
@@ -475,7 +476,7 @@ class NB_PT_Panel(Panel):
 # Register
 # =========================================================
 classes = (
-    NBPreferences,
+    NBExtensionPreferences,
     NBProps,
     NB_OT_Run,
     NB_OT_ShowLastLog,
