@@ -1,4 +1,4 @@
-import bpy, os, json, base64, datetime
+import bpy, os, json, base64, datetime, threading, queue, tempfile, time, uuid, re
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from bpy.props import StringProperty, BoolProperty, EnumProperty, IntProperty
@@ -76,10 +76,6 @@ class NBProps(PropertyGroup):
         default="",
         subtype='FILE_PATH'
     )
-    open_in_image_editor: BoolProperty(
-        name="Open Result in Image Editor (manual)",
-        default=True
-    )
 
     # 自動実行（レンダ連動）
     auto_on_render: BoolProperty(
@@ -132,6 +128,39 @@ class NBProps(PropertyGroup):
         description="ログファイル(nb_log.txt)の保存先（未指定なら //nb_out ）",
         default="",
         subtype='DIR_PATH'
+    )
+
+    # 生成画像の保存先や適用先の設定
+    save_location: EnumProperty(
+        name="Save Location",
+        items=[
+            ('TEMP', "Temp", "システムの一時ディレクトリに保存"),
+            ('PROJECT', "Project Relative Textures", "//textures に保存"),
+            ('ABSOLUTE', "Absolute Path", "Output Imageで指定した絶対パス"),
+        ],
+        default='TEMP',
+    )
+    apply_to: EnumProperty(
+        name="Apply To",
+        items=[
+            ('NONE', "None", "特に適用しない"),
+            ('IMAGE_EDITOR', "Image Editor", "Image Editor に表示"),
+            ('ACTIVE_OBJECT_MATERIAL', "Active Object Material", "アクティブオブジェクトのマテリアルに割り当て"),
+            ('COMPOSITOR', "Compositor", "コンポジターに画像ノードを追加"),
+        ],
+        default='IMAGE_EDITOR',
+    )
+    pack_image: BoolProperty(
+        name="Pack Image",
+        default=False,
+    )
+    show_toast: BoolProperty(
+        name="Show Toast",
+        default=True,
+    )
+    overwrite_existing: BoolProperty(
+        name="Overwrite Existing",
+        default=False,
     )
 
 # =========================================================
@@ -193,17 +222,28 @@ def _ensure_dir(path_dir: str):
     if path_dir:
         os.makedirs(path_dir, exist_ok=True)
 
-def _api_call(api_key: str, body: dict) -> dict:
-    req = Request(
-        API_URL,
-        data=json.dumps(body).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "x-goog-api-key": api_key.strip(),
-        }
-    )
-    with urlopen(req, timeout=180) as r:
-        return json.loads(r.read().decode("utf-8"))
+def _api_call(api_key: str, body: dict, cancel_event=None, timeout: int = 10, max_attempts: int = 5) -> dict:
+    """APIを呼び出し、指数バックオフ付きでリトライする"""
+    wait = 1
+    for attempt in range(max_attempts):
+        if cancel_event and cancel_event.is_set():
+            raise RuntimeError("Cancelled")
+        req = Request(
+            API_URL,
+            data=json.dumps(body).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": api_key.strip(),
+            }
+        )
+        try:
+            with urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except (URLError, HTTPError) as e:
+            if attempt == max_attempts - 1:
+                raise
+            time.sleep(wait)
+            wait = min(wait * 2, 8)
 
 def _extract_image_b64(res: dict) -> str:
     try:
@@ -226,7 +266,7 @@ def _augment_prompt(user_text: str) -> str:
     base = (user_text or "").strip()
     return (base + ("\n" if base else "") + guard)
 
-def _run_nano_banana(api_key: str, prompt: str, ref1: str, ref2: str, render_img: str) -> bytes:
+def _run_nano_banana(api_key: str, prompt: str, ref1: str, ref2: str, render_img: str, cancel_event=None) -> bytes:
     parts = [{"text": _augment_prompt(prompt)}]
 
     if ref1 and os.path.isfile(ref1):
@@ -239,7 +279,7 @@ def _run_nano_banana(api_key: str, prompt: str, ref1: str, ref2: str, render_img
     parts.append({"inline_data": {"mime_type": _guess_mime(render_img), "data": _file_to_b64(render_img)}})
 
     body = {"contents": [{"parts": parts}]}
-    res = _api_call(api_key, body)
+    res = _api_call(api_key, body, cancel_event=cancel_event)
 
     if isinstance(res, dict) and "error" in res:
         code = res["error"].get("code")
@@ -251,6 +291,85 @@ def _run_nano_banana(api_key: str, prompt: str, ref1: str, ref2: str, render_img
     if not img_b64:
         raise RuntimeError("画像が返りませんでした（プロンプトを簡潔化/保持要素を明記）")
     return base64.b64decode(img_b64)
+
+
+# =========================================================
+# Helpers（保存/適用）
+# =========================================================
+def _sanitize_filename(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]", "_", name)
+
+
+def _unique_path(base_dir: str, name: str, overwrite: bool) -> str:
+    os.makedirs(base_dir, exist_ok=True)
+    name = _sanitize_filename(name)
+    path = os.path.join(base_dir, name)
+    if overwrite or not os.path.exists(path):
+        return path
+    stem, ext = os.path.splitext(name)
+    return os.path.join(base_dir, f"{stem}_{uuid.uuid4().hex}{ext}")
+
+
+def _save_image_bytes(data: bytes, props) -> str:
+    if props.save_location == 'PROJECT':
+        base_dir = bpy.path.abspath("//textures")
+    elif props.save_location == 'ABSOLUTE' and props.output_path:
+        base_dir = os.path.dirname(_abs(props.output_path)) or tempfile.gettempdir()
+    else:
+        base_dir = tempfile.gettempdir()
+    filename = os.path.basename(props.output_path) if props.output_path else "nb_out.png"
+    path = _unique_path(base_dir, filename, props.overwrite_existing)
+    with open(path, "wb") as f:
+        f.write(data)
+    return path
+
+
+def _apply_image(path: str, props, ctx):
+    img = bpy.data.images.load(path, check_existing=True)
+    if props.pack_image:
+        img.pack()
+
+    if props.apply_to == 'IMAGE_EDITOR':
+        for area in ctx.screen.areas:
+            if area.type == 'IMAGE_EDITOR':
+                area.spaces.active.image = img
+                break
+    elif props.apply_to == 'ACTIVE_OBJECT_MATERIAL':
+        obj = ctx.object
+        if obj and obj.type == 'MESH':
+            mat = obj.active_material
+            if mat is None:
+                mat = bpy.data.materials.new(name="NanoBananaMat")
+                obj.data.materials.append(mat)
+            mat.use_nodes = True
+            nodes = mat.node_tree.nodes
+            links = mat.node_tree.links
+            tex = nodes.new("ShaderNodeTexImage")
+            tex.image = img
+            bsdf = nodes.get("Principled BSDF")
+            if bsdf:
+                links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
+    elif props.apply_to == 'COMPOSITOR':
+        scene = ctx.scene
+        if scene.use_nodes:
+            nt = scene.node_tree
+            img_node = nt.nodes.new("CompositorNodeImage")
+            img_node.image = img
+    return img
+
+
+def _async_run(api_key, prompt, ref1, ref2, render_img, q, cancel_event):
+    """バックグラウンドで推論を実行し、キューで進捗や結果を送る"""
+    try:
+        q.put(("progress", 10))
+        data = _run_nano_banana(api_key, prompt, ref1, ref2, render_img, cancel_event=cancel_event)
+        if cancel_event.is_set():
+            q.put(("canceled", None))
+            return
+        q.put(("progress", 100))
+        q.put(("result", data))
+    except Exception as e:
+        q.put(("error", str(e)))
 
 # =========================================================
 # Render ハンドラ
@@ -329,7 +448,17 @@ class NB_OT_Run(Operator):
     bl_label = "Run nano-banana (manual)"
     bl_description = "参照→参照→レンダの順でAPI実行して保存"
 
-    def execute(self, ctx):
+    def _finish(self, ctx):
+        wm = ctx.window_manager
+        try:
+            wm.progress_end()
+        except Exception:
+            pass
+        if hasattr(self, "_timer") and self._timer:
+            wm.event_timer_remove(self._timer)
+            self._timer = None
+
+    def invoke(self, ctx, event):
         scene = ctx.scene
         prefs = ctx.preferences.addons[ADDON_NAME].preferences
         props = scene.nb_props
@@ -340,58 +469,71 @@ class NB_OT_Run(Operator):
             nb_log(scene, "ERROR", "APIキー未設定（手動）")
             return {'CANCELLED'}
 
-        in_a = _abs(props.input_path)  # Render(Base)
+        in_a = _abs(props.input_path)
+        if not os.path.isfile(in_a):
+            self.report({'ERROR'}, "Render (Base) Image が見つかりません")
+            nb_log(scene, "ERROR", "Render (Base) Image が見つかりません")
+            return {'CANCELLED'}
         ref1 = _abs(props.input_path_b) if props.input_path_b else ""
         ref2 = _abs(props.input_path_c) if props.input_path_c else ""
 
-        try:
-            data = _run_nano_banana(api_key, props.prompt, ref1, ref2, in_a)
-        except FileNotFoundError as e:
-            self.report({'ERROR'}, str(e))
-            nb_log(scene, "ERROR", f"{e}")
-            return {'CANCELLED'}
-        except Exception as e:
-            self.report({'ERROR'}, f"{e}")
-            nb_log(scene, "ERROR", f"{e}")
-            return {'CANCELLED'}
+        self.scene = scene
+        self.props = props
+        self._queue = queue.Queue()
+        self._cancel = threading.Event()
+        self._thread = threading.Thread(
+            target=_async_run,
+            args=(api_key, props.prompt, ref1, ref2, in_a, self._queue, self._cancel),
+            daemon=True,
+        )
+        self._thread.start()
 
-        # 保存パス（手動）
-        out_path = _abs(props.output_path).strip()
-        if not out_path:
-            base_dir = os.path.dirname(in_a) if os.path.dirname(in_a) else bpy.path.abspath("//")
-            out_dir = base_dir; os.makedirs(out_dir, exist_ok=True)
-            out_path = os.path.join(out_dir, "nb_out.png")
-        else:
-            is_dir_like = out_path.endswith(("/", "\\")) or os.path.isdir(out_path) or (os.path.splitext(out_path)[1] == "")
-            if is_dir_like:
-                out_dir = out_path.rstrip("/\\")
-                _ensure_dir(out_dir)
-                out_path = os.path.join(out_dir, "nb_out.png")
-            else:
-                out_dir = os.path.dirname(out_path) or bpy.path.abspath("//")
-                _ensure_dir(out_dir)
+        wm = ctx.window_manager
+        wm.progress_begin(0, 100)
+        self._timer = wm.event_timer_add(0.2, window=ctx.window)
+        wm.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
 
-        try:
-            with open(out_path, "wb") as f:
-                f.write(data)
-        except Exception as e:
-            self.report({'ERROR'}, f"保存に失敗: {e}")
-            nb_log(scene, "ERROR", f"保存に失敗: {e}")
-            return {'CANCELLED'}
+    def modal(self, ctx, event):
+        if event.type == 'ESC':
+            self._cancel.set()
+            return {'RUNNING_MODAL'}
 
-        if props.open_in_image_editor:
+        wm = ctx.window_manager
+        while True:
             try:
-                img = bpy.data.images.load(out_path, check_existing=True)
-                for area in ctx.screen.areas:
-                    if area.type == 'IMAGE_EDITOR':
-                        area.spaces.active.image = img
-                        break
-            except Exception:
-                pass
+                kind, payload = self._queue.get_nowait()
+            except queue.Empty:
+                break
 
-        self.report({'INFO'}, f"保存: {out_path}")
-        nb_log(scene, "INFO", f"保存: {out_path}")
-        return {'FINISHED'}
+            if kind == 'progress':
+                wm.progress_update(payload)
+            elif kind == 'result':
+                path = _save_image_bytes(payload, self.props)
+                _apply_image(path, self.props, ctx)
+                if self.props.show_toast:
+                    self.report({'INFO'}, f"保存: {path}")
+                nb_log(self.scene, 'INFO', f"保存: {path}")
+                self._finish(ctx)
+                return {'FINISHED'}
+            elif kind == 'error':
+                if self.props.show_toast:
+                    self.report({'ERROR'}, payload)
+                nb_log(self.scene, 'ERROR', payload)
+                self._finish(ctx)
+                return {'CANCELLED'}
+            elif kind == 'canceled':
+                if self.props.show_toast:
+                    self.report({'INFO'}, "キャンセルしました")
+                nb_log(self.scene, 'INFO', "キャンセルされました")
+                self._finish(ctx)
+                return {'CANCELLED'}
+
+        return {'RUNNING_MODAL'}
+
+    def cancel(self, ctx):
+        self._cancel.set()
+        self._finish(ctx)
 
 class NB_OT_ToggleAuto(Operator):
     bl_idname = "nb.toggle_auto_on_render"
@@ -488,7 +630,11 @@ class NB_PT_Panel(Panel):
         col = layout.column(align=True)
         col.label(text=_("Manual Run"))
         col.prop(p, "output_path")
-        col.prop(p, "open_in_image_editor")
+        col.prop(p, "save_location")
+        col.prop(p, "apply_to")
+        col.prop(p, "pack_image")
+        col.prop(p, "show_toast")
+        col.prop(p, "overwrite_existing")
         col.operator("nb.run_edit", icon='PLAY')
 
         layout.separator()
