@@ -5,6 +5,13 @@ from bpy.props import StringProperty, BoolProperty, EnumProperty, IntProperty
 from bpy.types import AddonPreferences, Operator, Panel, PropertyGroup
 from bpy.app.translations import pgettext_iface as _
 
+# --- Version from package bl_info ---
+try:
+    from . import __init__ as _pkg
+    NB_VERSION = ".".join(map(str, _pkg.bl_info.get("version", (0, 0, 0))))
+except Exception:
+    NB_VERSION = "0.0.0"
+
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent"
 
 # =========================================================
@@ -27,6 +34,7 @@ class NBPreferences(AddonPreferences):
     )
     def draw(self, ctx):
         col = self.layout.column()
+        col.label(text=f"Nano-Banana v{NB_VERSION}")
         col.prop(self, "api_key")
 
 # =========================================================
@@ -462,6 +470,9 @@ class NB_PT_Panel(Panel):
     bl_space_type = 'IMAGE_EDITOR'
     bl_region_type = 'UI'
     bl_category = "Nano-Banana"
+
+    def draw_header(self, ctx):
+        self.layout.label(text=f"v{NB_VERSION}")
 
     def draw(self, ctx):
         p = ctx.scene.nb_props
