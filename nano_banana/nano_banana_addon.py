@@ -1,7 +1,7 @@
-import bpy, os, json, base64, datetime, threading, queue
+import bpy, os, json, base64, datetime, threading, queue, re
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
-from bpy.props import StringProperty, BoolProperty, EnumProperty, IntProperty
+from bpy.props import StringProperty, BoolProperty, EnumProperty
 from bpy.types import AddonPreferences, Operator, Panel, PropertyGroup
 from bpy.app.translations import pgettext_iface as _
 
@@ -72,7 +72,7 @@ class NBProps(PropertyGroup):
     )
     output_path: StringProperty(
         name="Output Image (manual)",
-        description="手動実行の保存先。未指定ならレンダ画像と同フォルダに nb_out.png",
+        description="Save path for manual run. If blank, nb_out_01.png is saved in the same folder as the render image.",
         default="",
         subtype='FILE_PATH'
     )
@@ -84,8 +84,8 @@ class NBProps(PropertyGroup):
     # 自動実行（レンダ連動）
     auto_on_render: BoolProperty(
         name="Auto Run on Render",
-        description="レンダ完了のたびにAI生成を実行（連番保存）",
-        default=False
+        description="レンダ完了のたびにAI生成を実行。保存時に _01, _02 の番号を付与",
+        default=False,
     )
     auto_out_dir: StringProperty(
         name="Auto Output Dir",
@@ -94,22 +94,6 @@ class NBProps(PropertyGroup):
         subtype='DIR_PATH'
     )
 
-    # リミッター
-    limit_enabled: BoolProperty(
-        name="Use Limiter",
-        description="API実行回数の上限を設定。上限到達で自動停止",
-        default=True
-    )
-    limit_max: IntProperty(
-        name="Max Calls",
-        description="上限回数（例: 100）",
-        default=100, min=1, soft_max=10000
-    )
-    limit_count: IntProperty(
-        name="Used",
-        description="現在の実行回数（自動カウント）",
-        default=0, min=0
-    )
 
     # ログ設定・状態
     verbose: BoolProperty(
@@ -193,6 +177,23 @@ def _ensure_dir(path_dir: str):
     if path_dir:
         os.makedirs(path_dir, exist_ok=True)
 
+def _next_version_number(path_dir: str, prefix: str, ext: str) -> int:
+    pattern = re.compile(rf"^{re.escape(prefix)}_(\d+){re.escape(ext)}$")
+    max_n = 0
+    if os.path.isdir(path_dir):
+        for name in os.listdir(path_dir):
+            m = pattern.match(name)
+            if m:
+                max_n = max(max_n, int(m.group(1)))
+    return max_n + 1
+
+def _next_version_path(path: str) -> str:
+    base, ext = os.path.splitext(path)
+    dir_path = os.path.dirname(path) or "."
+    prefix = os.path.basename(base)
+    n = _next_version_number(dir_path, prefix, ext)
+    return os.path.join(dir_path, f"{prefix}_{n:02d}{ext}")
+
 def _api_call(api_key: str, body: dict) -> dict:
     req = Request(
         API_URL,
@@ -272,19 +273,13 @@ def _run_worker(api_key: str, prompt: str, ref1: str, ref2: str, render_img: str
 # Render ハンドラ
 # =========================================================
 def _nb_on_render_write(scene):
-    """レンダ結果をPNG保存→API実行→連番で保存。ログは nb_log へ。"""
+    """レンダ結果をPNG保存→API実行→バージョン番号付きで保存。ログは nb_log へ。"""
     try:
         props = scene.nb_props
     except Exception:
         return
 
     if not getattr(props, "auto_on_render", False):
-        return
-
-    # リミッター判定
-    if props.limit_enabled and props.limit_count >= props.limit_max:
-        props.auto_on_render = False
-        nb_log(scene, "INFO", "Limiter reached. Auto disabled.")
         return
 
     # APIキー確認
@@ -295,14 +290,15 @@ def _nb_on_render_write(scene):
         return
 
     # 保存先準備
-    frame = scene.frame_current
     base_dir = bpy.path.abspath(props.auto_out_dir) if props.auto_out_dir else bpy.path.abspath("//nb_out")
     in_dir = os.path.join(base_dir, "in")
     out_dir = os.path.join(base_dir, "out")
     _ensure_dir(in_dir); _ensure_dir(out_dir)
 
+    idx = _next_version_number(out_dir, "nb_out", ".png")
+
     # Render Result 取得・保存
-    render_png = os.path.join(in_dir, f"render_{frame:04d}.png")
+    render_png = os.path.join(in_dir, f"render_{idx:02d}.png")
     try:
         img = bpy.data.images.get("Render Result")
         if img is None:
@@ -324,18 +320,16 @@ def _nb_on_render_write(scene):
         nb_log(scene, "ERROR", f"推論失敗: {e}")
         return
 
-    # 出力保存（連番）
-    out_png = os.path.join(out_dir, f"nb_out_{frame:04d}.png")
+    # 出力保存（バージョン番号付与）
+    out_png = os.path.join(out_dir, f"nb_out_{idx:02d}.png")
     try:
         with open(out_png, "wb") as f:
             f.write(data)
     except Exception as e:
         nb_log(scene, "ERROR", f"出力保存失敗: {e}")
         return
-
-    # カウント加算
-    props.limit_count += 1
-    nb_log(scene, "INFO", f"Frame {frame} → {out_png}  (count {props.limit_count}/{props.limit_max})")
+    frame = scene.frame_current
+    nb_log(scene, "INFO", f"Frame {frame} → {out_png}")
 
 # =========================================================
 # Operators
@@ -368,17 +362,19 @@ class NB_OT_Run(Operator):
         if not out_path:
             base_dir = os.path.dirname(in_a) if os.path.dirname(in_a) else bpy.path.abspath("//")
             out_dir = base_dir; os.makedirs(out_dir, exist_ok=True)
-            out_path = os.path.join(out_dir, "nb_out.png")
+            out_base = os.path.join(out_dir, "nb_out.png")
         else:
             is_dir_like = out_path.endswith(("/", "\\")) or os.path.isdir(out_path) or (os.path.splitext(out_path)[1] == "")
             if is_dir_like:
                 out_dir = out_path.rstrip("/\\")
                 _ensure_dir(out_dir)
-                out_path = os.path.join(out_dir, "nb_out.png")
+                out_base = os.path.join(out_dir, "nb_out.png")
             else:
                 out_dir = os.path.dirname(out_path) or bpy.path.abspath("//")
                 _ensure_dir(out_dir)
+                out_base = out_path
 
+        out_path = _next_version_path(out_base)
         self._out_path = out_path
         self._scene = scene
         self._props = props
@@ -501,16 +497,6 @@ class NB_OT_ToggleAuto(Operator):
             nb_log(scene, "INFO", "Auto Run: 無効（render_write から解除）")
         return {'FINISHED'}
 
-class NB_OT_ResetCounter(Operator):
-    bl_idname = "nb.reset_counter"
-    bl_label = "Reset Limiter Counter"
-    bl_description = "使用回数カウンタを0に戻す"
-
-    def execute(self, ctx):
-        ctx.scene.nb_props.limit_count = 0
-        nb_log(ctx.scene, "INFO", "カウンタを0にしました")
-        return {'FINISHED'}
-
 class NB_OT_ShowLastLog(Operator):
     bl_idname = "nb.show_last_log"
     bl_label = "Show Last Log"
@@ -576,21 +562,12 @@ class NB_PT_Panel(Panel):
 
         layout.separator()
         col = layout.box().column(align=True)
-        col.label(text=_("Auto Run on Render (per-frame)"))
+        col.label(text=_("Auto Run on Render"))
         row = col.row(align=True)
         row.prop(p, "auto_on_render", text=_("Enabled"))
         on = col.operator("nb.toggle_auto_on_render", text=_("Apply"), icon='CHECKMARK')
         on.enable = p.auto_on_render
         col.prop(p, "auto_out_dir")
-
-        layout.separator()
-        col = layout.box().column(align=True)
-        col.label(text=_("Limiter"))
-        col.prop(p, "limit_enabled")
-        row = col.row(align=True)
-        row.prop(p, "limit_max")
-        row.prop(p, "limit_count")
-        col.operator("nb.reset_counter", icon='RECOVER_LAST')
 
         layout.separator()
         box = layout.box()
@@ -617,7 +594,6 @@ classes = (
     NBProps,
     NB_OT_Run,
     NB_OT_ToggleAuto,
-    NB_OT_ResetCounter,
     NB_OT_ShowLastLog,
     NB_PT_Panel,
 )
