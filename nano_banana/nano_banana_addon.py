@@ -2,32 +2,21 @@ import bpy, os, json, base64, datetime, threading, queue, re
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from bpy.props import StringProperty, BoolProperty, EnumProperty
-from bpy.types import AddonPreferences, Operator, Panel, PropertyGroup
+from bpy.types import Operator, Panel, PropertyGroup
 from bpy.app.translations import pgettext_iface as _
 
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent"
 
 # =========================================================
-# Add-on Preferences
-# =========================================================
-ADDON_NAME = __package__ if __package__ else __name__
-
-
-class NBPreferences(AddonPreferences):
-    bl_idname = ADDON_NAME
-    api_key: StringProperty(
-        name="Gemini API Key",
-        description="Google AI StudioのAPIキー",
-        subtype='PASSWORD'
-    )
-    def draw(self, ctx):
-        col = self.layout.column()
-        col.prop(self, "api_key")
-
-# =========================================================
 # Scene Properties
 # =========================================================
 class NBProps(PropertyGroup):
+    api_key: StringProperty(
+        name="Gemini API Key",
+        description="Google AI StudioのAPIキー",
+        subtype='PASSWORD',
+        default="",
+    )
     # モード（手動UIの見た目用）
     mode: EnumProperty(
         name="Mode",
@@ -260,12 +249,11 @@ class NB_OT_Run(Operator):
 
     def invoke(self, ctx, event):
         scene = ctx.scene
-        prefs = ctx.preferences.addons[ADDON_NAME].preferences
         props = scene.nb_props
 
-        api_key = (prefs.api_key or "").strip()
+        api_key = (props.api_key or "").strip()
         if not api_key:
-            self.report({'ERROR'}, "APIキー未設定（Edit > Preferences > Add-ons で設定）")
+            self.report({'ERROR'}, "APIキー未設定（Nパネルで設定）")
             nb_log(scene, "ERROR", "APIキー未設定（手動）")
             return {'CANCELLED'}
 
@@ -430,6 +418,9 @@ class NB_PT_Panel(Panel):
         p = ctx.scene.nb_props
         layout = self.layout
 
+        layout.prop(p, "api_key")
+        layout.separator()
+
         box = layout.box()
         box.label(text=_("Mode"))
         box.prop(p, "mode", expand=True)
@@ -475,7 +466,6 @@ class NB_PT_Panel(Panel):
 # Register
 # =========================================================
 classes = (
-    NBPreferences,
     NBProps,
     NB_OT_Run,
     NB_OT_ShowLastLog,
