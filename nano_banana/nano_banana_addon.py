@@ -1,4 +1,4 @@
-import bpy, os, json, base64, datetime
+import bpy, os, json, base64, datetime, threading, queue
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from bpy.props import StringProperty, BoolProperty, EnumProperty, IntProperty
@@ -252,6 +252,22 @@ def _run_nano_banana(api_key: str, prompt: str, ref1: str, ref2: str, render_img
         raise RuntimeError("画像が返りませんでした（プロンプトを簡潔化/保持要素を明記）")
     return base64.b64decode(img_b64)
 
+
+def _run_worker(api_key: str, prompt: str, ref1: str, ref2: str, render_img: str, q: "queue.Queue", cancel_evt: "threading.Event") -> None:
+    """バックグラウンドスレッドから API を実行し結果をキューへ送る"""
+    try:
+        if cancel_evt.is_set():
+            q.put({"type": "cancel"})
+            return
+        data = _run_nano_banana(api_key, prompt, ref1, ref2, render_img)
+        if cancel_evt.is_set():
+            q.put({"type": "cancel"})
+        else:
+            q.put({"type": "progress", "value": 100})
+            q.put({"type": "done", "data": data})
+    except Exception as e:
+        q.put({"type": "error", "message": str(e)})
+
 # =========================================================
 # Render ハンドラ
 # =========================================================
@@ -329,7 +345,7 @@ class NB_OT_Run(Operator):
     bl_label = "Run nano-banana (manual)"
     bl_description = "参照→参照→レンダの順でAPI実行して保存"
 
-    def execute(self, ctx):
+    def invoke(self, ctx, event):
         scene = ctx.scene
         prefs = ctx.preferences.addons[ADDON_NAME].preferences
         props = scene.nb_props
@@ -340,22 +356,14 @@ class NB_OT_Run(Operator):
             nb_log(scene, "ERROR", "APIキー未設定（手動）")
             return {'CANCELLED'}
 
-        in_a = _abs(props.input_path)  # Render(Base)
+        in_a = _abs(props.input_path)
+        if not os.path.isfile(in_a):
+            self.report({'ERROR'}, "Render (Base) Image が見つかりません")
+            nb_log(scene, "ERROR", "Render (Base) Image が見つかりません")
+            return {'CANCELLED'}
         ref1 = _abs(props.input_path_b) if props.input_path_b else ""
         ref2 = _abs(props.input_path_c) if props.input_path_c else ""
 
-        try:
-            data = _run_nano_banana(api_key, props.prompt, ref1, ref2, in_a)
-        except FileNotFoundError as e:
-            self.report({'ERROR'}, str(e))
-            nb_log(scene, "ERROR", f"{e}")
-            return {'CANCELLED'}
-        except Exception as e:
-            self.report({'ERROR'}, f"{e}")
-            nb_log(scene, "ERROR", f"{e}")
-            return {'CANCELLED'}
-
-        # 保存パス（手動）
         out_path = _abs(props.output_path).strip()
         if not out_path:
             base_dir = os.path.dirname(in_a) if os.path.dirname(in_a) else bpy.path.abspath("//")
@@ -371,27 +379,80 @@ class NB_OT_Run(Operator):
                 out_dir = os.path.dirname(out_path) or bpy.path.abspath("//")
                 _ensure_dir(out_dir)
 
-        try:
-            with open(out_path, "wb") as f:
-                f.write(data)
-        except Exception as e:
-            self.report({'ERROR'}, f"保存に失敗: {e}")
-            nb_log(scene, "ERROR", f"保存に失敗: {e}")
+        self._out_path = out_path
+        self._scene = scene
+        self._props = props
+        self._queue = queue.Queue()
+        self._cancel = threading.Event()
+        self._thread = threading.Thread(target=_run_worker, args=(api_key, props.prompt, ref1, ref2, in_a, self._queue, self._cancel), daemon=True)
+        self._thread.start()
+
+        wm = ctx.window_manager
+        self._timer = wm.event_timer_add(0.1, window=ctx.window)
+        wm.progress_begin(0, 100)
+        wm.progress_update(0)
+        wm.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def modal(self, ctx, event):
+        wm = ctx.window_manager
+        if event.type == 'ESC':
+            self._cancel.set()
+            wm.progress_end()
+            if self._timer:
+                wm.event_timer_remove(self._timer)
             return {'CANCELLED'}
 
-        if props.open_in_image_editor:
-            try:
-                img = bpy.data.images.load(out_path, check_existing=True)
-                for area in ctx.screen.areas:
-                    if area.type == 'IMAGE_EDITOR':
-                        area.spaces.active.image = img
-                        break
-            except Exception:
-                pass
+        if event.type == 'TIMER':
+            while not self._queue.empty():
+                msg = self._queue.get()
+                kind = msg.get('type')
+                if kind == 'progress':
+                    wm.progress_update(msg.get('value', 0))
+                elif kind == 'done':
+                    data = msg.get('data')
+                    try:
+                        with open(self._out_path, 'wb') as f:
+                            f.write(data)
+                    except Exception as e:
+                        self.report({'ERROR'}, f"保存に失敗: {e}")
+                        nb_log(self._scene, "ERROR", f"保存に失敗: {e}")
+                        wm.progress_end()
+                        if self._timer:
+                            wm.event_timer_remove(self._timer)
+                        return {'CANCELLED'}
 
-        self.report({'INFO'}, f"保存: {out_path}")
-        nb_log(scene, "INFO", f"保存: {out_path}")
-        return {'FINISHED'}
+                    if self._props.open_in_image_editor:
+                        try:
+                            img = bpy.data.images.load(self._out_path, check_existing=True)
+                            for area in ctx.screen.areas:
+                                if area.type == 'IMAGE_EDITOR':
+                                    area.spaces.active.image = img
+                                    break
+                        except Exception:
+                            pass
+
+                    self.report({'INFO'}, f"保存: {self._out_path}")
+                    nb_log(self._scene, "INFO", f"保存: {self._out_path}")
+                    wm.progress_end()
+                    if self._timer:
+                        wm.event_timer_remove(self._timer)
+                    return {'FINISHED'}
+                elif kind == 'error':
+                    msg_txt = msg.get('message', '')
+                    self.report({'ERROR'}, msg_txt)
+                    nb_log(self._scene, "ERROR", msg_txt)
+                    wm.progress_end()
+                    if self._timer:
+                        wm.event_timer_remove(self._timer)
+                    return {'CANCELLED'}
+                elif kind == 'cancel':
+                    nb_log(self._scene, "INFO", "キャンセルされました")
+                    wm.progress_end()
+                    if self._timer:
+                        wm.event_timer_remove(self._timer)
+                    return {'CANCELLED'}
+        return {'RUNNING_MODAL'}
 
 class NB_OT_ToggleAuto(Operator):
     bl_idname = "nb.toggle_auto_on_render"
