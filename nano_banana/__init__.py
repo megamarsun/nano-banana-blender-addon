@@ -4,7 +4,7 @@ bl_info = {
     "version": (0, 4, 0),
     "blender": (4, 0, 0),
     "location": "Image Editor > Nパネル > Nano-Banana",
-    "description": "Gemini 2.5 Flash Image(API)で参照×2+レンダ(最後)を編集。レンダ完了で自動実行/連番保存。ログ強化＆リミッター付",
+    "description": "Gemini 2.5 Flash Image(API)で参照×2+レンダ(最後)を編集。レンダ完了で自動実行し、保存時は _01, _02 の番号を付与。ログ機能あり",
     "category": "Image",
 }
 
