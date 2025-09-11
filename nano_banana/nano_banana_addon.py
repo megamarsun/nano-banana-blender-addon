@@ -384,13 +384,20 @@ class NB_OT_Run(Operator):
         self._props = props
         self._queue = queue.Queue()
         self._cancel = threading.Event()
-        self._thread = threading.Thread(target=_run_worker, args=(api_key, props.prompt, ref1, ref2, in_a, self._queue, self._cancel), daemon=True)
+        self._thread = threading.Thread(
+            target=_run_worker,
+            args=(api_key, props.prompt, ref1, ref2, in_a, self._queue, self._cancel),
+            daemon=True,
+        )
         self._thread.start()
 
         wm = ctx.window_manager
         self._timer = wm.event_timer_add(0.1, window=ctx.window)
         wm.progress_begin(0, 100)
         wm.progress_update(0)
+        self._window = ctx.window
+        if self._window:
+            self._window.cursor_modal_set('WAIT')
         wm.modal_handler_add(self)
         return {'RUNNING_MODAL'}
 
@@ -401,6 +408,8 @@ class NB_OT_Run(Operator):
             wm.progress_end()
             if self._timer:
                 wm.event_timer_remove(self._timer)
+            if getattr(self, '_window', None):
+                self._window.cursor_modal_restore()
             return {'CANCELLED'}
 
         if event.type == 'TIMER':
@@ -420,15 +429,22 @@ class NB_OT_Run(Operator):
                         wm.progress_end()
                         if self._timer:
                             wm.event_timer_remove(self._timer)
+                        if getattr(self, '_window', None):
+                            self._window.cursor_modal_restore()
                         return {'CANCELLED'}
 
                     if self._props.open_in_image_editor:
                         try:
                             img = bpy.data.images.load(self._out_path, check_existing=True)
+                            img.reload()
                             for area in ctx.screen.areas:
                                 if area.type == 'IMAGE_EDITOR':
                                     area.spaces.active.image = img
+                                    area.tag_redraw()
                                     break
+                            for window in ctx.window_manager.windows:
+                                for a in window.screen.areas:
+                                    a.tag_redraw()
                         except Exception:
                             pass
 
@@ -437,6 +453,8 @@ class NB_OT_Run(Operator):
                     wm.progress_end()
                     if self._timer:
                         wm.event_timer_remove(self._timer)
+                    if getattr(self, '_window', None):
+                        self._window.cursor_modal_restore()
                     return {'FINISHED'}
                 elif kind == 'error':
                     msg_txt = msg.get('message', '')
@@ -445,12 +463,16 @@ class NB_OT_Run(Operator):
                     wm.progress_end()
                     if self._timer:
                         wm.event_timer_remove(self._timer)
+                    if getattr(self, '_window', None):
+                        self._window.cursor_modal_restore()
                     return {'CANCELLED'}
                 elif kind == 'cancel':
                     nb_log(self._scene, "INFO", "キャンセルされました")
                     wm.progress_end()
                     if self._timer:
                         wm.event_timer_remove(self._timer)
+                    if getattr(self, '_window', None):
+                        self._window.cursor_modal_restore()
                     return {'CANCELLED'}
         return {'RUNNING_MODAL'}
 
