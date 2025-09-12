@@ -7,6 +7,37 @@ from bpy.app.translations import pgettext_iface as _
 
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent"
 
+
+# =========================================================
+# Path Helpers
+# =========================================================
+def _abs(path: str) -> str:
+    return bpy.path.abspath(path) if path else ""
+
+
+def _rel(path: str) -> str:
+    """Return Blender-style relative path if possible."""
+    if not path:
+        return ""
+    abs_path = _abs(path)
+    try:
+        rel_path = bpy.path.relpath(abs_path)
+        return rel_path if rel_path.startswith("//") else abs_path
+    except ValueError:
+        return abs_path
+
+
+def _update_to_rel(attr: str):
+    """Create update callback that converts a path property to relative."""
+    def updater(self, _ctx):
+        p = getattr(self, attr)
+        if p:
+            new = _rel(p)
+            if new != p:
+                setattr(self, attr, new)
+    return updater
+
+
 # =========================================================
 # Scene Properties
 # =========================================================
@@ -33,19 +64,22 @@ class NBProps(PropertyGroup):
         name="Render (Base) Image",
         description="最後に渡す加工対象（レンダ）PNG/JPG（必須）",
         default="",
-        subtype='FILE_PATH'
+        subtype='FILE_PATH',
+        update=_update_to_rel("input_path")
     )
     input_path_b: StringProperty(
         name="Ref 1 (optional)",
         description="色/背景/質感など参照画像（任意）",
         default="",
-        subtype='FILE_PATH'
+        subtype='FILE_PATH',
+        update=_update_to_rel("input_path_b")
     )
     input_path_c: StringProperty(
         name="Ref 2 (optional)",
         description="追加の参照画像（任意）",
         default="",
-        subtype='FILE_PATH'
+        subtype='FILE_PATH',
+        update=_update_to_rel("input_path_c")
     )
 
     # 手動実行
@@ -64,7 +98,8 @@ class NBProps(PropertyGroup):
         name="Output Image (manual)",
         description="Save path for manual run. If blank, nb_out_01.png is saved in the same folder as the render image.",
         default="",
-        subtype='FILE_PATH'
+        subtype='FILE_PATH',
+        update=_update_to_rel("output_path")
     )
     open_in_image_editor: BoolProperty(
         name="Open Result in Image Editor (manual)",
@@ -91,7 +126,8 @@ class NBProps(PropertyGroup):
         name="Log Dir",
         description="ログファイル(nb_log.txt)の保存先（未指定なら //nb_out ）",
         default="",
-        subtype='DIR_PATH'
+        subtype='DIR_PATH',
+        update=_update_to_rel("log_dir")
     )
 
 # =========================================================
@@ -136,9 +172,6 @@ def nb_log(scene, level: str, msg: str):
 # =========================================================
 # Helpers（API/入出力）
 # =========================================================
-def _abs(path):
-    return bpy.path.abspath(path) if path else ""
-
 def _file_to_b64(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode("ascii")
