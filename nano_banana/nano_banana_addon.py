@@ -450,6 +450,22 @@ class NB_OT_NewPromptText(Operator):
         return {'FINISHED'}
 
 
+class NB_OT_OpenPromptText(Operator):
+    bl_idname = "nb.open_prompt_text"
+    bl_label = "Open Prompt Text"
+
+    def execute(self, ctx):
+        txt = ctx.scene.nb_props.prompt_text
+        if not txt:
+            return {'CANCELLED'}
+        bpy.ops.wm.window_new()
+        win = ctx.window_manager.windows[-1]
+        area = win.screen.areas[0]
+        area.type = 'TEXT_EDITOR'
+        area.spaces.active.text = txt
+        return {'FINISHED'}
+
+
 class NB_OT_ShowLastLog(Operator):
     bl_idname = "nb.show_last_log"
     bl_label = "Show Last Log"
@@ -511,7 +527,7 @@ class NB_PT_Panel(Panel):
         layout.template_ID(p, "prompt_text", new="nb.new_prompt_text")
         row = layout.row()
         row.enabled = bool(p.prompt_text)
-        row.operator("text.jump", text=_("Open in Editor"), icon='TEXT')
+        row.operator("nb.open_prompt_text", text=_("Open in Editor"), icon='TEXT')
 
         layout.separator()
         col = layout.column(align=True)
@@ -544,6 +560,7 @@ classes = (
     NBProps,
     NB_OT_Run,
     NB_OT_NewPromptText,
+    NB_OT_OpenPromptText,
     NB_OT_ShowLastLog,
     NB_PT_Panel,
 )
