@@ -5,6 +5,7 @@ I18N_DICT = {
         ("*", "Nano-Banana (Gemini Image)"): "Nano-Banana（Gemini画像）",
         ("*", "Nano-Banana"): "Nano-Banana",
         ("*", "Gemini API Key"): "Gemini APIキー",
+        ("*", "Open API Key Page"): "APIキー取得ページを開く",
         ("*", "Mode"): "モード",
         ("*", "Edit (1 image)"): "編集（1枚）",
         ("*", "Compose (Refs+Render)"): "合成（参照+レンダ）",
