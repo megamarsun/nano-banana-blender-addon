@@ -11,7 +11,6 @@ I18N_DICT = {
         ("*", "Render (Base) Image"): "レンダ（ベース）画像",
         ("*", "Ref 1 (optional)"): "参照1（任意）",
         ("*", "Ref 2 (optional)"): "参照2（任意）",
-        ("*", "Edit Prompt"): "編集プロンプト",
         ("*", "Prompt Text"): "プロンプトテキスト",
         ("*", "New Prompt Text"): "新規プロンプトテキスト",
         ("*", "Output Image (manual)"): "出力画像（手動）",

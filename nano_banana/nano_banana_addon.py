@@ -8,6 +8,20 @@ from bpy.app.translations import pgettext_iface as _
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent"
 
 # =========================================================
+# Property updates
+# =========================================================
+
+
+def _update_prompt_from_text(self, _context):
+    if self.prompt_text:
+        self.prompt = self.prompt_text.as_string()
+
+
+def _update_text_from_prompt(self, _context):
+    if self.prompt_text:
+        self.prompt_text.from_string(self.prompt)
+
+# =========================================================
 # Scene Properties
 # =========================================================
 class NBProps(PropertyGroup):
@@ -53,14 +67,14 @@ class NBProps(PropertyGroup):
         name="Prompt Text",
         description="Edit prompt text datablock",
         type=bpy.types.Text,
-        update=lambda self, ctx: setattr(self, 'prompt', self.prompt_text.as_string() if self.prompt_text else self.prompt),
+        update=_update_prompt_from_text,
     )
     prompt: StringProperty(
         name="Edit Prompt",
         description="例: '色・構図は維持。フィギュアの質感に。'",
         default="",
         options={'HIDDEN'},
-        update=lambda self, ctx: self.prompt_text.from_string(self.prompt) if self.prompt_text else None,
+        update=_update_text_from_prompt,
     )
     output_path: StringProperty(
         name="Output Image (manual)",
