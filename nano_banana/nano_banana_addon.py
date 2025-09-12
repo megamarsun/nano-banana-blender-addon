@@ -297,9 +297,23 @@ class NB_OT_Run(Operator):
             return {'CANCELLED'}
 
         in_a = _abs(props.input_path)
-        if not os.path.isfile(in_a):
+        if not in_a:
             self.report({'ERROR'}, "Render (Base) Image が見つかりません")
             nb_log(scene, "ERROR", "Render (Base) Image が見つかりません")
+            return {'CANCELLED'}
+
+        # 生成ボタン押下時にレンダリングを実行し、その結果で参照画像を上書き
+        try:
+            os.makedirs(os.path.dirname(in_a), exist_ok=True)
+            prev = scene.render.filepath
+            scene.render.filepath = in_a
+            bpy.ops.render.render(write_still=True)
+        finally:
+            scene.render.filepath = prev
+
+        if not os.path.isfile(in_a):
+            self.report({'ERROR'}, "Render (Base) Image のレンダリングに失敗しました")
+            nb_log(scene, "ERROR", "Render (Base) Image のレンダリングに失敗しました")
             return {'CANCELLED'}
         ref1 = _abs(props.input_path_b) if props.input_path_b else ""
         ref2 = _abs(props.input_path_c) if props.input_path_c else ""
