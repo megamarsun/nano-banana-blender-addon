@@ -269,11 +269,13 @@ def _run_worker(api_key: str, prompt: str, ref1: str, ref2: str, render_img: str
 class NB_OT_PromptNewAndOpen(Operator):
     bl_idname = "nb.prompt_new_and_open"
     bl_label = "New Prompt Text"
-    bl_description = "新しいテキストデータブロックを作成し、ウィンドウで開く"
+    bl_description = "Create a new Text datablock and open it in a new window"
 
     def execute(self, ctx):
         scene = ctx.scene
         txt = bpy.data.texts.new("NBPrompt")
+        if scene.nb_props.prompt:
+            txt.from_string(scene.nb_props.prompt)
         scene.nb_props.prompt_text = txt
         bpy.ops.screen.window_new()
         new_win = ctx.window_manager.windows[-1]

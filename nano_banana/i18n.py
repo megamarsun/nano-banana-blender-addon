@@ -13,6 +13,9 @@ I18N_DICT = {
         ("*", "Ref 2 (optional)"): "参照2（任意）",
         ("*", "Prompt Text"): "プロンプトテキスト",
         ("*", "New Prompt Text"): "新規プロンプトテキスト",
+        ("*", "Create a new Text datablock and open it in a new window"): (
+            "新しいテキストデータブロックを作成し、ウィンドウで開く"
+        ),
         ("*", "Output Image (manual)"): "出力画像（手動）",
         ("*", "Open Result in Image Editor (manual)"): "結果をImage Editorで開く（手動）",
         ("*", "Verbose (Console + Text + File)"): "詳細ログ（コンソール + テキスト + ファイル）",
