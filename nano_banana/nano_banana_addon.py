@@ -1,7 +1,7 @@
 import bpy, os, json, base64, datetime, threading, queue, re
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
-from bpy.props import StringProperty, BoolProperty, EnumProperty
+from bpy.props import StringProperty, BoolProperty, EnumProperty, PointerProperty
 from bpy.types import Operator, Panel, PropertyGroup
 from bpy.app.translations import pgettext_iface as _
 
@@ -49,6 +49,12 @@ class NBProps(PropertyGroup):
     )
 
     # 手動実行
+    prompt_text: PointerProperty(
+        name="Prompt Text",
+        description="Text datablock used for the edit prompt",
+        type=bpy.types.Text,
+    )
+    # 旧プロパティ(フォールバック用)
     prompt: StringProperty(
         name="Edit Prompt",
         description="例: '色・構図は維持。フィギュアの質感に。'",
@@ -287,9 +293,10 @@ class NB_OT_Run(Operator):
         self._props = props
         self._queue = queue.Queue()
         self._cancel = threading.Event()
+        prompt_text = props.prompt_text.as_string() if props.prompt_text else props.prompt
         self._thread = threading.Thread(
             target=_run_worker,
-            args=(api_key, props.prompt, ref1, ref2, in_a, self._queue, self._cancel),
+            args=(api_key, prompt_text, ref1, ref2, in_a, self._queue, self._cancel),
             daemon=True,
         )
         self._thread.start()
@@ -379,6 +386,23 @@ class NB_OT_Run(Operator):
                     return {'CANCELLED'}
         return {'RUNNING_MODAL'}
 
+
+class NB_OT_NewPromptText(Operator):
+    bl_idname = "nb.new_prompt_text"
+    bl_label = "New Prompt Text"
+
+    def execute(self, ctx):
+        name = f"Prompt {datetime.datetime.now().strftime('%H%M%S')}"
+        txt = bpy.data.texts.new(name)
+        bpy.ops.wm.window_new()
+        win = ctx.window_manager.windows[-1]
+        area = win.screen.areas[0]
+        area.type = 'TEXT_EDITOR'
+        area.spaces.active.text = txt
+        ctx.scene.nb_props.prompt_text = txt
+        return {'FINISHED'}
+
+
 class NB_OT_ShowLastLog(Operator):
     bl_idname = "nb.show_last_log"
     bl_label = "Show Last Log"
@@ -436,7 +460,10 @@ class NB_PT_Panel(Panel):
         layout.prop(p, "input_path")
 
         layout.separator()
-        layout.prop(p, "prompt")
+        layout.template_ID(p, "prompt_text", new="nb.new_prompt_text")
+        row = layout.row()
+        row.enabled = bool(p.prompt_text)
+        row.operator("text.jump", text=_("Open in Editor"), icon='TEXT')
 
         layout.separator()
         col = layout.column(align=True)
@@ -468,6 +495,7 @@ class NB_PT_Panel(Panel):
 classes = (
     NBProps,
     NB_OT_Run,
+    NB_OT_NewPromptText,
     NB_OT_ShowLastLog,
     NB_PT_Panel,
 )
