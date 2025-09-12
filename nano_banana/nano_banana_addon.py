@@ -443,6 +443,7 @@ class NB_PT_Panel(Panel):
         layout = self.layout
 
         layout.prop(p, "api_key")
+        layout.operator("wm.url_open", text=_("Open API Key Page")).url = "https://aistudio.google.com/app/apikey"
         layout.separator()
 
         box = layout.box()
