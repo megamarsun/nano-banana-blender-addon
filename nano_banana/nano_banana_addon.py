@@ -1,7 +1,7 @@
 import bpy, os, json, base64, datetime, threading, queue, re
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
-from bpy.props import StringProperty, BoolProperty, EnumProperty
+from bpy.props import StringProperty, BoolProperty, EnumProperty, PointerProperty
 from bpy.types import Operator, Panel, PropertyGroup
 from bpy.app.translations import pgettext_iface as _
 
@@ -49,10 +49,18 @@ class NBProps(PropertyGroup):
     )
 
     # 手動実行
+    prompt_text: PointerProperty(
+        name="Prompt Text",
+        description="Edit prompt text datablock",
+        type=bpy.types.Text,
+        update=lambda self, ctx: setattr(self, 'prompt', self.prompt_text.as_string() if self.prompt_text else self.prompt),
+    )
     prompt: StringProperty(
         name="Edit Prompt",
         description="例: '色・構図は維持。フィギュアの質感に。'",
-        default=""
+        default="",
+        options={'HIDDEN'},
+        update=lambda self, ctx: self.prompt_text.from_string(self.prompt) if self.prompt_text else None,
     )
     output_path: StringProperty(
         name="Output Image (manual)",
@@ -242,12 +250,32 @@ def _run_worker(api_key: str, prompt: str, ref1: str, ref2: str, render_img: str
 # =========================================================
 # Operators
 # =========================================================
+
+
+class NB_OT_PromptNewAndOpen(Operator):
+    bl_idname = "nb.prompt_new_and_open"
+    bl_label = "New Prompt Text"
+    bl_description = "新しいテキストデータブロックを作成し、ウィンドウで開く"
+
+    def execute(self, ctx):
+        scene = ctx.scene
+        txt = bpy.data.texts.new("NBPrompt")
+        scene.nb_props.prompt_text = txt
+        bpy.ops.screen.window_new()
+        new_win = ctx.window_manager.windows[-1]
+        for area in new_win.screen.areas:
+            area.type = 'TEXT_EDITOR'
+            area.spaces.active.text = txt
+            break
+        return {'FINISHED'}
+
+
 class NB_OT_Run(Operator):
     bl_idname = "nb.run_edit"
     bl_label = "Run nano-banana (manual)"
     bl_description = "参照→参照→レンダの順でAPI実行して保存"
 
-    def invoke(self, ctx, event):
+    def execute(self, ctx):
         scene = ctx.scene
         props = scene.nb_props
 
@@ -264,6 +292,15 @@ class NB_OT_Run(Operator):
             return {'CANCELLED'}
         ref1 = _abs(props.input_path_b) if props.input_path_b else ""
         ref2 = _abs(props.input_path_c) if props.input_path_c else ""
+
+        prompt_str = ""
+        if props.prompt_text:
+            try:
+                prompt_str = props.prompt_text.as_string()
+            except Exception:
+                prompt_str = ""
+        if not prompt_str:
+            prompt_str = props.prompt
 
         out_path = _abs(props.output_path).strip()
         if not out_path:
@@ -289,7 +326,7 @@ class NB_OT_Run(Operator):
         self._cancel = threading.Event()
         self._thread = threading.Thread(
             target=_run_worker,
-            args=(api_key, props.prompt, ref1, ref2, in_a, self._queue, self._cancel),
+            args=(api_key, prompt_str, ref1, ref2, in_a, self._queue, self._cancel),
             daemon=True,
         )
         self._thread.start()
@@ -436,7 +473,10 @@ class NB_PT_Panel(Panel):
         layout.prop(p, "input_path")
 
         layout.separator()
-        layout.prop(p, "prompt")
+        layout.label(text=_("Prompt Text"))
+        row = layout.row(align=True)
+        row.template_ID(p, "prompt_text")
+        row.operator("nb.prompt_new_and_open", text=_("New Prompt Text"), icon='ADD')
 
         layout.separator()
         col = layout.column(align=True)
@@ -467,6 +507,7 @@ class NB_PT_Panel(Panel):
 # =========================================================
 classes = (
     NBProps,
+    NB_OT_PromptNewAndOpen,
     NB_OT_Run,
     NB_OT_ShowLastLog,
     NB_PT_Panel,
