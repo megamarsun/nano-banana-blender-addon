@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build a release zip of the nano_banana add-on without binaries.
+"""Build a release zip of the monkey_banana add-on without binaries.
 
 The resulting archive contains only the Python source inside the
-``nano_banana`` package. Version control metadata, documentation, and
+``monkey_banana`` package. Version control metadata, documentation, and
 compiled artifacts are excluded to keep the distribution clean.
 """
 
@@ -13,8 +13,8 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).parent
-SRC_DIR = ROOT / "nano_banana"
-OUTPUT_ZIP = ROOT / "nano_banana.zip"
+SRC_DIR = ROOT / "monkey_banana"
+OUTPUT_ZIP = ROOT / "monkey_banana.zip"
 
 
 def purge_compiled() -> None:
@@ -26,7 +26,7 @@ def purge_compiled() -> None:
 
 
 def build_zip() -> None:
-    """Create a zip archive containing only sources under ``nano_banana``."""
+    """Create a zip archive containing only sources under ``monkey_banana``."""
     with zipfile.ZipFile(OUTPUT_ZIP, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for file in SRC_DIR.rglob("*"):
             if file.is_dir():
