@@ -88,22 +88,12 @@ class MBProps(PropertyGroup):
         description="Text datablock used for the edit prompt",
         type=bpy.types.Text,
     )
-    # 旧プロパティ(フォールバック用)
-    prompt: StringProperty(
-        name="Edit Prompt",
-        description="例: '色・構図は維持。フィギュアの質感に。'",
-        default=""
-    )
     output_path: StringProperty(
         name="Output Image (manual)",
         description="Save path for manual run. If blank, mb_out_01.png is saved in the same folder as the render image.",
         default="",
         subtype='FILE_PATH',
         update=_update_to_rel("output_path")
-    )
-    open_in_image_editor: BoolProperty(
-        name="Open Result in Image Editor (manual)",
-        default=True
     )
 
     # ログ設定・状態
@@ -340,7 +330,7 @@ class MB_OT_Run(Operator):
         self._props = props
         self._queue = queue.Queue()
         self._cancel = threading.Event()
-        prompt_text = props.prompt_text.as_string() if props.prompt_text else props.prompt
+        prompt_text = props.prompt_text.as_string() if props.prompt_text else ""
         self._thread = threading.Thread(
             target=_run_worker,
             args=(api_key, prompt_text, ref1, ref2, in_a, self._queue, self._cancel),
@@ -390,20 +380,19 @@ class MB_OT_Run(Operator):
                             self._window.cursor_modal_restore()
                         return {'CANCELLED'}
 
-                    if self._props.open_in_image_editor:
-                        try:
-                            img = bpy.data.images.load(self._out_path, check_existing=True)
-                            img.reload()
-                            for area in ctx.screen.areas:
-                                if area.type == 'IMAGE_EDITOR':
-                                    area.spaces.active.image = img
-                                    area.tag_redraw()
-                                    break
-                            for window in ctx.window_manager.windows:
-                                for a in window.screen.areas:
-                                    a.tag_redraw()
-                        except Exception:
-                            pass
+                    try:
+                        img = bpy.data.images.load(self._out_path, check_existing=True)
+                        img.reload()
+                        for area in ctx.screen.areas:
+                            if area.type == 'IMAGE_EDITOR':
+                                area.spaces.active.image = img
+                                area.tag_redraw()
+                                break
+                        for window in ctx.window_manager.windows:
+                            for a in window.screen.areas:
+                                a.tag_redraw()
+                    except Exception:
+                        pass
 
                     self.report({'INFO'}, f"保存: {self._out_path}")
                     mb_log(self._scene, "INFO", f"保存: {self._out_path}")
@@ -533,7 +522,6 @@ class MB_PT_Panel(Panel):
         col = layout.column(align=True)
         col.label(text=_("Manual Run"))
         col.prop(p, "output_path")
-        col.prop(p, "open_in_image_editor")
         col.operator("mb.run_edit", icon='PLAY')
 
         layout.separator()
