@@ -2,8 +2,8 @@ import bpy.app.translations as tr
 
 I18N_DICT = {
     "ja_JP": {
-        ("*", "Nano-Banana (Gemini Image)"): "Nano-Banana（Gemini画像）",
-        ("*", "Nano-Banana"): "Nano-Banana",
+        ("*", "Monkey Banana (Gemini Image)"): "Monkey Banana（Gemini画像）",
+        ("*", "Monkey Banana"): "Monkey Banana",
         ("*", "Gemini API Key"): "Gemini APIキー",
         ("*", "Open API Key Page"): "APIキー取得ページを開く",
         ("*", "Mode"): "モード",
@@ -20,8 +20,8 @@ I18N_DICT = {
         ("*", "Last Info"): "最終情報",
         ("*", "Last Error"): "最終エラー",
         ("*", "Log Dir"): "ログフォルダ",
-        ("*", "Nano-Banana Log"): "Nano-Bananaログ",
-        ("*", "Run nano-banana (manual)"): "nano-bananaを実行（手動）",
+        ("*", "Monkey Banana Log"): "Monkey Bananaログ",
+        ("*", "Run Monkey Banana (manual)"): "Monkey Bananaを実行（手動）",
         ("*", "Show Last Log"): "最後のログを表示",
         ("*", "Show Last Info"): "最終情報を表示",
         ("*", "Show Last Error"): "最終エラーを表示",
@@ -33,7 +33,7 @@ I18N_DICT = {
         ("*", "Open in Editor"): "エディタで開く",
         ("*", "Last Info: "): "最終情報: ",
         ("*", "Last Error: "): "最終エラー: ",
-        ("*", "Save path for manual run. If blank, nb_out_01.png is saved in the same folder as the render image."): "手動実行の保存先。未指定ならレンダ画像と同フォルダに nb_out_01.png 形式で保存",
+        ("*", "Save path for manual run. If blank, mb_out_01.png is saved in the same folder as the render image."): "手動実行の保存先。未指定ならレンダ画像と同フォルダに mb_out_01.png 形式で保存",
     }
 }
 

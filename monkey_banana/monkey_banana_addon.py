@@ -41,7 +41,7 @@ def _update_to_rel(attr: str):
 # =========================================================
 # Scene Properties
 # =========================================================
-class NBProps(PropertyGroup):
+class MBProps(PropertyGroup):
     api_key: StringProperty(
         name="Gemini API Key",
         description="Google AI StudioのAPIキー",
@@ -96,7 +96,7 @@ class NBProps(PropertyGroup):
     )
     output_path: StringProperty(
         name="Output Image (manual)",
-        description="Save path for manual run. If blank, nb_out_01.png is saved in the same folder as the render image.",
+        description="Save path for manual run. If blank, mb_out_01.png is saved in the same folder as the render image.",
         default="",
         subtype='FILE_PATH',
         update=_update_to_rel("output_path")
@@ -109,7 +109,7 @@ class NBProps(PropertyGroup):
     # ログ設定・状態
     verbose: BoolProperty(
         name="Verbose (Console + Text + File)",
-        description="システムコンソール/テキストブロック/nb_log.txtに出力",
+        description="システムコンソール/テキストブロック/mb_log.txtに出力",
         default=True
     )
     last_info: StringProperty(
@@ -124,7 +124,7 @@ class NBProps(PropertyGroup):
     )
     log_dir: StringProperty(
         name="Log Dir",
-        description="ログファイル(nb_log.txt)の保存先（未指定なら //nb_out ）",
+        description="ログファイル(mb_log.txt)の保存先（未指定なら //mb_out ）",
         default="",
         subtype='DIR_PATH',
         update=_update_to_rel("log_dir")
@@ -137,28 +137,28 @@ def _now():
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 def _log_write_to_textblock(line: str):
-    name = "NanoBananaLog"
+    name = "MonkeyBananaLog"
     txt = bpy.data.texts.get(name) or bpy.data.texts.new(name)
     txt.write(line + "\n")
 
 def _log_write_to_file(path_dir: str, line: str):
     try:
         if not path_dir:
-            path_dir = bpy.path.abspath("//nb_out")
+            path_dir = bpy.path.abspath("//mb_out")
         os.makedirs(path_dir, exist_ok=True)
-        with open(os.path.join(path_dir, "nb_log.txt"), "a", encoding="utf-8") as f:
+        with open(os.path.join(path_dir, "mb_log.txt"), "a", encoding="utf-8") as f:
             f.write(line + "\n")
     except Exception:
         pass
 
-def nb_log(scene, level: str, msg: str):
+def mb_log(scene, level: str, msg: str):
     """Console + Scene Props + Text + File に出力"""
     ts = _now()
     line = f"[{ts}] [{level}] {msg}"
-    print("[Nano-Banana]", line)  # Console
+    print("[Monkey Banana]", line)  # Console
 
     try:
-        p = scene.nb_props
+        p = scene.mb_props
         if level == "ERROR":
             p.last_error = line
         else:
@@ -236,7 +236,7 @@ def _augment_prompt(user_text: str) -> str:
     base = (user_text or "").strip()
     return (base + ("\n" if base else "") + guard)
 
-def _run_nano_banana(api_key: str, prompt: str, ref1: str, ref2: str, render_img: str) -> bytes:
+def _run_monkey_banana(api_key: str, prompt: str, ref1: str, ref2: str, render_img: str) -> bytes:
     parts = [{"text": _augment_prompt(prompt)}]
 
     if ref1 and os.path.isfile(ref1):
@@ -269,7 +269,7 @@ def _run_worker(api_key: str, prompt: str, ref1: str, ref2: str, render_img: str
         if cancel_evt.is_set():
             q.put({"type": "cancel"})
             return
-        data = _run_nano_banana(api_key, prompt, ref1, ref2, render_img)
+        data = _run_monkey_banana(api_key, prompt, ref1, ref2, render_img)
         if cancel_evt.is_set():
             q.put({"type": "cancel"})
         else:
@@ -281,25 +281,25 @@ def _run_worker(api_key: str, prompt: str, ref1: str, ref2: str, render_img: str
 # =========================================================
 # Operators
 # =========================================================
-class NB_OT_Run(Operator):
-    bl_idname = "nb.run_edit"
-    bl_label = "Run nano-banana (manual)"
+class MB_OT_Run(Operator):
+    bl_idname = "mb.run_edit"
+    bl_label = "Run Monkey Banana (manual)"
     bl_description = "参照→参照→レンダの順でAPI実行して保存"
 
     def invoke(self, ctx, event):
         scene = ctx.scene
-        props = scene.nb_props
+        props = scene.mb_props
 
         api_key = (props.api_key or "").strip()
         if not api_key:
             self.report({'ERROR'}, "APIキー未設定（Nパネルで設定）")
-            nb_log(scene, "ERROR", "APIキー未設定（手動）")
+            mb_log(scene, "ERROR", "APIキー未設定（手動）")
             return {'CANCELLED'}
 
         in_a = _abs(props.input_path)
         if not in_a:
             self.report({'ERROR'}, "Render (Base) Image が見つかりません")
-            nb_log(scene, "ERROR", "Render (Base) Image が見つかりません")
+            mb_log(scene, "ERROR", "Render (Base) Image が見つかりません")
             return {'CANCELLED'}
 
         # 生成ボタン押下時にレンダリングを実行し、その結果で参照画像を上書き
@@ -313,7 +313,7 @@ class NB_OT_Run(Operator):
 
         if not os.path.isfile(in_a):
             self.report({'ERROR'}, "Render (Base) Image のレンダリングに失敗しました")
-            nb_log(scene, "ERROR", "Render (Base) Image のレンダリングに失敗しました")
+            mb_log(scene, "ERROR", "Render (Base) Image のレンダリングに失敗しました")
             return {'CANCELLED'}
         ref1 = _abs(props.input_path_b) if props.input_path_b else ""
         ref2 = _abs(props.input_path_c) if props.input_path_c else ""
@@ -322,13 +322,13 @@ class NB_OT_Run(Operator):
         if not out_path:
             base_dir = os.path.dirname(in_a) if os.path.dirname(in_a) else bpy.path.abspath("//")
             out_dir = base_dir; os.makedirs(out_dir, exist_ok=True)
-            out_base = os.path.join(out_dir, "nb_out.png")
+            out_base = os.path.join(out_dir, "mb_out.png")
         else:
             is_dir_like = out_path.endswith(("/", "\\")) or os.path.isdir(out_path) or (os.path.splitext(out_path)[1] == "")
             if is_dir_like:
                 out_dir = out_path.rstrip("/\\")
                 _ensure_dir(out_dir)
-                out_base = os.path.join(out_dir, "nb_out.png")
+                out_base = os.path.join(out_dir, "mb_out.png")
             else:
                 out_dir = os.path.dirname(out_path) or bpy.path.abspath("//")
                 _ensure_dir(out_dir)
@@ -382,7 +382,7 @@ class NB_OT_Run(Operator):
                             f.write(data)
                     except Exception as e:
                         self.report({'ERROR'}, f"保存に失敗: {e}")
-                        nb_log(self._scene, "ERROR", f"保存に失敗: {e}")
+                        mb_log(self._scene, "ERROR", f"保存に失敗: {e}")
                         wm.progress_end()
                         if self._timer:
                             wm.event_timer_remove(self._timer)
@@ -406,7 +406,7 @@ class NB_OT_Run(Operator):
                             pass
 
                     self.report({'INFO'}, f"保存: {self._out_path}")
-                    nb_log(self._scene, "INFO", f"保存: {self._out_path}")
+                    mb_log(self._scene, "INFO", f"保存: {self._out_path}")
                     wm.progress_end()
                     if self._timer:
                         wm.event_timer_remove(self._timer)
@@ -416,7 +416,7 @@ class NB_OT_Run(Operator):
                 elif kind == 'error':
                     msg_txt = msg.get('message', '')
                     self.report({'ERROR'}, msg_txt)
-                    nb_log(self._scene, "ERROR", msg_txt)
+                    mb_log(self._scene, "ERROR", msg_txt)
                     wm.progress_end()
                     if self._timer:
                         wm.event_timer_remove(self._timer)
@@ -424,7 +424,7 @@ class NB_OT_Run(Operator):
                         self._window.cursor_modal_restore()
                     return {'CANCELLED'}
                 elif kind == 'cancel':
-                    nb_log(self._scene, "INFO", "キャンセルされました")
+                    mb_log(self._scene, "INFO", "キャンセルされました")
                     wm.progress_end()
                     if self._timer:
                         wm.event_timer_remove(self._timer)
@@ -434,8 +434,8 @@ class NB_OT_Run(Operator):
         return {'RUNNING_MODAL'}
 
 
-class NB_OT_NewPromptText(Operator):
-    bl_idname = "nb.new_prompt_text"
+class MB_OT_NewPromptText(Operator):
+    bl_idname = "mb.new_prompt_text"
     bl_label = "New Prompt Text"
 
     def execute(self, ctx):
@@ -446,16 +446,16 @@ class NB_OT_NewPromptText(Operator):
         area = win.screen.areas[0]
         area.type = 'TEXT_EDITOR'
         area.spaces.active.text = txt
-        ctx.scene.nb_props.prompt_text = txt
+        ctx.scene.mb_props.prompt_text = txt
         return {'FINISHED'}
 
 
-class NB_OT_OpenPromptText(Operator):
-    bl_idname = "nb.open_prompt_text"
+class MB_OT_OpenPromptText(Operator):
+    bl_idname = "mb.open_prompt_text"
     bl_label = "Open Prompt Text"
 
     def execute(self, ctx):
-        txt = ctx.scene.nb_props.prompt_text
+        txt = ctx.scene.mb_props.prompt_text
         if not txt:
             return {'CANCELLED'}
         bpy.ops.wm.window_new()
@@ -466,8 +466,8 @@ class NB_OT_OpenPromptText(Operator):
         return {'FINISHED'}
 
 
-class NB_OT_ShowLastLog(Operator):
-    bl_idname = "nb.show_last_log"
+class MB_OT_ShowLastLog(Operator):
+    bl_idname = "mb.show_last_log"
     bl_label = "Show Last Log"
 
     kind: EnumProperty(
@@ -476,7 +476,7 @@ class NB_OT_ShowLastLog(Operator):
     )
 
     def execute(self, ctx):
-        p = ctx.scene.nb_props
+        p = ctx.scene.mb_props
         text = p.last_info if self.kind == 'INFO' else p.last_error
         msg = text or "(no logs)"
 
@@ -487,7 +487,7 @@ class NB_OT_ShowLastLog(Operator):
                 col.label(text=line)
 
         bpy.context.window_manager.popup_menu(
-            draw, title="Nano-Banana Log",
+            draw, title="Monkey Banana Log",
             icon='INFO' if self.kind=='INFO' else 'ERROR'
         )
         return {'FINISHED'}
@@ -495,14 +495,14 @@ class NB_OT_ShowLastLog(Operator):
 # =========================================================
 # UI Panel
 # =========================================================
-class NB_PT_Panel(Panel):
-    bl_label = "Nano-Banana (Gemini Image)"
+class MB_PT_Panel(Panel):
+    bl_label = "Monkey Banana (Gemini Image)"
     bl_space_type = 'IMAGE_EDITOR'
     bl_region_type = 'UI'
-    bl_category = "Nano-Banana"
+    bl_category = "Monkey Banana"
 
     def draw(self, ctx):
-        p = ctx.scene.nb_props
+        p = ctx.scene.mb_props
         layout = self.layout
 
         layout.prop(p, "api_key")
@@ -524,17 +524,17 @@ class NB_PT_Panel(Panel):
         layout.prop(p, "input_path")
 
         layout.separator()
-        layout.template_ID(p, "prompt_text", new="nb.new_prompt_text")
+        layout.template_ID(p, "prompt_text", new="mb.new_prompt_text")
         row = layout.row()
         row.enabled = bool(p.prompt_text)
-        row.operator("nb.open_prompt_text", text=_("Open in Editor"), icon='TEXT')
+        row.operator("mb.open_prompt_text", text=_("Open in Editor"), icon='TEXT')
 
         layout.separator()
         col = layout.column(align=True)
         col.label(text=_("Manual Run"))
         col.prop(p, "output_path")
         col.prop(p, "open_in_image_editor")
-        col.operator("nb.run_edit", icon='PLAY')
+        col.operator("mb.run_edit", icon='PLAY')
 
         layout.separator()
         box = layout.box()
@@ -548,32 +548,32 @@ class NB_PT_Panel(Panel):
         if p.last_error:
             box.label(text=_("Last Error: ") + p.last_error[-80:], icon='ERROR')
         row = box.row(align=True)
-        op = row.operator("nb.show_last_log", text=_("Show Last Info"), icon='INFO')
+        op = row.operator("mb.show_last_log", text=_("Show Last Info"), icon='INFO')
         op.kind = 'INFO'
-        op = row.operator("nb.show_last_log", text=_("Show Last Error"), icon='ERROR')
+        op = row.operator("mb.show_last_log", text=_("Show Last Error"), icon='ERROR')
         op.kind = 'ERROR'
 
 # =========================================================
 # Register
 # =========================================================
 classes = (
-    NBProps,
-    NB_OT_Run,
-    NB_OT_NewPromptText,
-    NB_OT_OpenPromptText,
-    NB_OT_ShowLastLog,
-    NB_PT_Panel,
+    MBProps,
+    MB_OT_Run,
+    MB_OT_NewPromptText,
+    MB_OT_OpenPromptText,
+    MB_OT_ShowLastLog,
+    MB_PT_Panel,
 )
 
 def register():
     for c in classes:
         bpy.utils.register_class(c)
-    bpy.types.Scene.nb_props = bpy.props.PointerProperty(type=NBProps)
+    bpy.types.Scene.mb_props = bpy.props.PointerProperty(type=MBProps)
 
 def unregister():
     for c in reversed(classes):
         bpy.utils.unregister_class(c)
-    del bpy.types.Scene.nb_props
+    del bpy.types.Scene.mb_props
 
 if __name__ == "__main__":
     register()
