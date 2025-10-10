@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Monkey Banana",
     "author": "Masamune Sakaki",
-    "version": (1, 0, 0),
+    "version": (1, 1, 0),
     "blender": (4, 0, 0),
     "location": "Image Editor > N-panel > MonkeyBanana",
     "description": "Editing images rendered with Gemini 2.5 Flash Image (API)",

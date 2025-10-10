@@ -1,11 +1,11 @@
-import bpy, os, json, base64, datetime, threading, queue, re
+import bpy, os, json, base64, datetime, threading, queue, re, time
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from bpy.props import StringProperty, BoolProperty, EnumProperty, PointerProperty
 from bpy.types import Operator, Panel, PropertyGroup
 from bpy.app.translations import pgettext_iface as _
 
-API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent"
+API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent"
 
 
 # =========================================================
@@ -57,6 +57,18 @@ class MBProps(PropertyGroup):
             ('COMPOSE', "Compose (Refs+Render)", "参照×2 + レンダ（最後が加工対象）")
         ],
         default='COMPOSE'
+    )
+
+    aspect_ratio: EnumProperty(
+        name="Aspect Ratio",
+        description="出力画像のアスペクト比",
+        items=[
+            ('AUTO', "Auto", "入力に追従(デフォルト)"),
+            ('SQUARE', "1:1", "正方形"),
+            ('R43', "4:3", "4:3"),
+            ('R169', "16:9", "16:9"),
+        ],
+        default='AUTO'
     )
 
     # 入力
@@ -193,6 +205,32 @@ def _next_version_path(path: str) -> str:
     n = _next_version_number(dir_path, prefix, ext)
     return os.path.join(dir_path, f"{prefix}_{n:02d}{ext}")
 
+
+class MBError(Exception):
+    def __init__(self, category: str, message: str, original: Exception | None = None):
+        super().__init__(message)
+        self.category = category
+        self.original = original
+
+
+_ASPECT_RATIO_MAP = {
+    'SQUARE': "1:1",
+    'R43': "4:3",
+    'R169': "16:9",
+}
+
+
+def _build_generation_config(props) -> dict | None:
+    config = {}
+    aspect = getattr(props, "aspect_ratio", "AUTO")
+    ratio = _ASPECT_RATIO_MAP.get(aspect)
+    if ratio:
+        config["imageConfig"] = {"aspectRatio": ratio}
+
+    config["responseModalities"] = ["IMAGE"]
+    return config or None
+
+
 def _api_call(api_key: str, body: dict) -> dict:
     req = Request(
         API_URL,
@@ -204,6 +242,37 @@ def _api_call(api_key: str, body: dict) -> dict:
     )
     with urlopen(req, timeout=180) as r:
         return json.loads(r.read().decode("utf-8"))
+
+
+def _api_call_with_retry(api_key: str, body: dict, on_retry=None) -> dict:
+    max_attempts = 3
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return _api_call(api_key, body)
+        except HTTPError as e:
+            category = None
+            if e.code == 429:
+                category = "RATE_LIMIT"
+            elif 500 <= e.code < 600:
+                category = "SERVER"
+            if category and attempt < max_attempts:
+                if on_retry:
+                    on_retry(category)
+                time.sleep(1.0 * (2 ** (attempt - 1)))
+                continue
+            if category:
+                raise MBError(category, str(e), e) from e
+            raise
+        except URLError as e:
+            category = "NETWORK"
+            if attempt < max_attempts:
+                if on_retry:
+                    on_retry(category)
+                time.sleep(1.0 * (2 ** (attempt - 1)))
+                continue
+            raise MBError(category, str(e), e) from e
 
 def _extract_image_b64(res: dict) -> str:
     try:
@@ -226,7 +295,36 @@ def _augment_prompt(user_text: str) -> str:
     base = (user_text or "").strip()
     return (base + ("\n" if base else "") + guard)
 
-def _run_monkey_banana(api_key: str, prompt: str, ref1: str, ref2: str, render_img: str) -> bytes:
+
+def _assign_image_to_nodes(image) -> bool:
+    try:
+        scene = bpy.context.scene
+        if scene and getattr(scene, "use_nodes", False):
+            node_tree = scene.node_tree
+            if node_tree:
+                for node in node_tree.nodes:
+                    if node.type == 'IMAGE':
+                        node.image = image
+                        return True
+
+        obj = bpy.context.active_object
+        if obj:
+            for slot in obj.material_slots:
+                mat = slot.material
+                if not mat:
+                    continue
+                node_tree = getattr(mat, "node_tree", None)
+                if node_tree:
+                    for node in node_tree.nodes:
+                        if node.type == 'TEX_IMAGE':
+                            node.image = image
+                            return True
+    except Exception:
+        pass
+    return False
+
+
+def _run_monkey_banana(api_key: str, prompt: str, ref1: str, ref2: str, render_img: str, generation_config=None, on_retry=None) -> bytes:
     parts = [{"text": _augment_prompt(prompt)}]
 
     if ref1 and os.path.isfile(ref1):
@@ -239,13 +337,15 @@ def _run_monkey_banana(api_key: str, prompt: str, ref1: str, ref2: str, render_i
     parts.append({"inline_data": {"mime_type": _guess_mime(render_img), "data": _file_to_b64(render_img)}})
 
     body = {"contents": [{"parts": parts}]}
-    res = _api_call(api_key, body)
+    if generation_config:
+        body["generationConfig"] = generation_config
+    res = _api_call_with_retry(api_key, body, on_retry=on_retry)
 
     if isinstance(res, dict) and "error" in res:
         code = res["error"].get("code")
         status = res["error"].get("status")
         msg = res["error"].get("message", "Unknown error")
-        raise RuntimeError(f"APIエラー: {code}/{status} {msg}")
+        raise MBError("API_ERROR", f"{code}/{status} {msg}")
 
     img_b64 = _extract_image_b64(res)
     if not img_b64:
@@ -253,20 +353,25 @@ def _run_monkey_banana(api_key: str, prompt: str, ref1: str, ref2: str, render_i
     return base64.b64decode(img_b64)
 
 
-def _run_worker(api_key: str, prompt: str, ref1: str, ref2: str, render_img: str, q: "queue.Queue", cancel_evt: "threading.Event") -> None:
+def _run_worker(api_key: str, prompt: str, ref1: str, ref2: str, render_img: str, generation_config, q: "queue.Queue", cancel_evt: "threading.Event") -> None:
     """バックグラウンドスレッドから API を実行し結果をキューへ送る"""
     try:
         if cancel_evt.is_set():
             q.put({"type": "cancel"})
             return
-        data = _run_monkey_banana(api_key, prompt, ref1, ref2, render_img)
+        def _on_retry(category):
+            q.put({"type": "retry", "category": category})
+
+        data = _run_monkey_banana(api_key, prompt, ref1, ref2, render_img, generation_config, on_retry=_on_retry)
         if cancel_evt.is_set():
             q.put({"type": "cancel"})
         else:
             q.put({"type": "progress", "value": 100})
             q.put({"type": "done", "data": data})
+    except MBError as e:
+        q.put({"type": "error", "message": str(e), "category": e.category})
     except Exception as e:
-        q.put({"type": "error", "message": str(e)})
+        q.put({"type": "error", "message": str(e), "category": "GENERAL"})
 
 # =========================================================
 # Operators
@@ -331,9 +436,10 @@ class MB_OT_Run(Operator):
         self._queue = queue.Queue()
         self._cancel = threading.Event()
         prompt_text = props.prompt_text.as_string() if props.prompt_text else ""
+        generation_config = _build_generation_config(props)
         self._thread = threading.Thread(
             target=_run_worker,
-            args=(api_key, prompt_text, ref1, ref2, in_a, self._queue, self._cancel),
+            args=(api_key, prompt_text, ref1, ref2, in_a, generation_config, self._queue, self._cancel),
             daemon=True,
         )
         self._thread.start()
@@ -383,6 +489,9 @@ class MB_OT_Run(Operator):
                     try:
                         img = bpy.data.images.load(self._out_path, check_existing=True)
                         img.reload()
+                        if _assign_image_to_nodes(img):
+                            assign_msg = _("Assign image to nodes")
+                            mb_log(self._scene, "INFO", assign_msg)
                         for area in ctx.screen.areas:
                             if area.type == 'IMAGE_EDITOR':
                                 area.spaces.active.image = img
@@ -404,14 +513,29 @@ class MB_OT_Run(Operator):
                     return {'FINISHED'}
                 elif kind == 'error':
                     msg_txt = msg.get('message', '')
-                    self.report({'ERROR'}, msg_txt)
-                    mb_log(self._scene, "ERROR", msg_txt)
+                    category = msg.get('category', 'GENERAL')
+                    prefix = f"API {category}: " if category != 'GENERAL' else ''
+                    formatted = prefix + msg_txt
+                    self.report({'ERROR'}, formatted)
+                    mb_log(self._scene, "ERROR", formatted)
                     wm.progress_end()
                     if self._timer:
                         wm.event_timer_remove(self._timer)
                     if getattr(self, '_window', None):
                         self._window.cursor_modal_restore()
                     return {'CANCELLED'}
+                elif kind == 'retry':
+                    category = msg.get('category', '')
+                    if category == 'RATE_LIMIT':
+                        notice = _("Rate limited. Retrying...")
+                    elif category == 'NETWORK':
+                        notice = _("Network error. Retrying...")
+                    elif category == 'SERVER':
+                        notice = _("Server error. Retrying...")
+                    else:
+                        notice = "Retrying..."
+                    self.report({'INFO'}, notice)
+                    mb_log(self._scene, "INFO", notice)
                 elif kind == 'cancel':
                     mb_log(self._scene, "INFO", "キャンセルされました")
                     wm.progress_end()
@@ -501,6 +625,7 @@ class MB_PT_Panel(Panel):
         box = layout.box()
         box.label(text=_("Mode"))
         box.prop(p, "mode", expand=True)
+        box.prop(p, "aspect_ratio")
 
         col = layout.column(align=True)
         if p.mode == 'COMPOSE':

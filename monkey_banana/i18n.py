@@ -9,6 +9,11 @@ I18N_DICT = {
         ("*", "Mode"): "モード",
         ("*", "Edit (1 image)"): "編集（1枚）",
         ("*", "Compose (Refs+Render)"): "合成（参照+レンダ）",
+        ("*", "Aspect Ratio"): "アスペクト比",
+        ("*", "Auto"): "自動",
+        ("*", "1:1"): "1:1",
+        ("*", "4:3"): "4:3",
+        ("*", "16:9"): "16:9",
         ("*", "Render (Base) Image"): "レンダ（ベース）画像",
         ("*", "Ref 1 (optional)"): "参照1（任意）",
         ("*", "Ref 2 (optional)"): "参照2（任意）",
@@ -31,6 +36,10 @@ I18N_DICT = {
         ("*", "Open in Editor"): "エディタで開く",
         ("*", "Last Info: "): "最終情報: ",
         ("*", "Last Error: "): "最終エラー: ",
+        ("*", "Assign image to nodes"): "ノードへ画像を割り当て",
+        ("*", "Rate limited. Retrying..."): "レート制限。再試行中…",
+        ("*", "Network error. Retrying..."): "ネットワークエラー。再試行中…",
+        ("*", "Server error. Retrying..."): "サーバーエラー。再試行中…",
         ("*", "Save path for manual run. If blank, mb_out_01.png is saved in the same folder as the render image."): "手動実行の保存先。未指定ならレンダ画像と同フォルダに mb_out_01.png 形式で保存",
     }
 }
