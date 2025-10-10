@@ -244,6 +244,25 @@ def _api_call(api_key: str, body: dict) -> dict:
         return json.loads(r.read().decode("utf-8"))
 
 
+def _parse_api_error_payload(body_text: str) -> str | None:
+    if not body_text:
+        return None
+    try:
+        payload = json.loads(body_text)
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    err = payload.get("error")
+    if not isinstance(err, dict):
+        return None
+    code = err.get("code")
+    status = err.get("status")
+    message = err.get("message")
+    parts = [str(p) for p in (code, status, message) if p]
+    return " / ".join(parts) if parts else None
+
+
 def _api_call_with_retry(api_key: str, body: dict, on_retry=None) -> dict:
     max_attempts = 3
     attempt = 0
@@ -278,22 +297,12 @@ def _api_call_with_retry(api_key: str, body: dict, on_retry=None) -> dict:
                 continue
 
             message, body_text = _http_error_message(e)
+            payload_msg = _parse_api_error_payload(body_text)
             if category:
-                raise MBError(category, message, e) from e
+                raise MBError(category, payload_msg or message, e) from e
 
-            api_payload = None
-            if body_text:
-                try:
-                    api_payload = json.loads(body_text)
-                except Exception:
-                    api_payload = None
-            if isinstance(api_payload, dict) and "error" in api_payload:
-                err = api_payload["error"] or {}
-                code = err.get("code")
-                status = err.get("status")
-                msg = err.get("message") or body_text
-                formatted = f"{code}/{status} {msg}".strip()
-                raise MBError("API_ERROR", formatted, e) from e
+            if payload_msg:
+                raise MBError("API_ERROR", payload_msg, e) from e
 
             raise MBError("GENERAL", message, e) from e
         except URLError as e:
