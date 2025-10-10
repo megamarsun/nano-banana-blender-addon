@@ -265,20 +265,8 @@ def _parse_api_error_payload(body_text: str) -> str | None:
 
 def _api_call_with_retry(api_key: str, body: dict, on_retry=None) -> dict:
     max_attempts = 3
+    base_sleep = 1.0
     attempt = 0
-
-    def _http_error_message(error: HTTPError):
-        body_text = ""
-        try:
-            data = error.read()
-            if data:
-                body_text = data.decode("utf-8", errors="ignore")
-        except Exception:
-            body_text = ""
-        message = f"HTTP {error.code}: {error.reason}" if getattr(error, "code", None) else str(error)
-        if body_text:
-            message = f"{message} - {body_text}"
-        return message, body_text
 
     while True:
         attempt += 1
@@ -286,31 +274,67 @@ def _api_call_with_retry(api_key: str, body: dict, on_retry=None) -> dict:
             return _api_call(api_key, body)
         except HTTPError as e:
             category = None
-            if e.code == 429:
+            if getattr(e, "code", None) == 429:
                 category = "RATE_LIMIT"
-            elif 500 <= e.code < 600:
+            elif 500 <= getattr(e, "code", 0) < 600:
                 category = "SERVER"
+
+            body_text = ""
+            try:
+                raw = e.read()
+                if raw:
+                    body_text = raw.decode("utf-8", errors="ignore")
+            except Exception:
+                body_text = ""
+
+            payload_msg = _parse_api_error_payload(body_text)
+
             if category and attempt < max_attempts:
                 if on_retry:
                     on_retry(category)
-                time.sleep(1.0 * (2 ** (attempt - 1)))
+                time.sleep(base_sleep * (2 ** (attempt - 1)))
                 continue
 
-            message, body_text = _http_error_message(e)
-            payload_msg = _parse_api_error_payload(body_text)
-            if category:
-                raise MBError(category, payload_msg or message, e) from e
+            base_message = (
+                f"HTTP {getattr(e, 'code', '?')}: {getattr(e, 'reason', '') or str(e)}"
+                if getattr(e, "code", None)
+                else str(e)
+            )
 
             if payload_msg:
-                raise MBError("API_ERROR", payload_msg, e) from e
+                message = payload_msg
+                final_category = category or "API_ERROR"
+            else:
+                if category == "RATE_LIMIT":
+                    retry_after = None
+                    try:
+                        headers = getattr(e, "headers", None)
+                        if headers:
+                            retry_after = headers.get("Retry-After")
+                    except Exception:
+                        retry_after = None
+                    advice = "Please wait before trying again."
+                    if retry_after:
+                        advice = f"Please wait about {retry_after} seconds before trying again."
+                    message = f"Rate limit exceeded ({base_message}). {advice}"
+                    final_category = "RATE_LIMIT"
+                elif category == "SERVER":
+                    message = f"Server error ({base_message}). Please try again later."
+                    final_category = "SERVER"
+                else:
+                    if body_text:
+                        message = f"{base_message} - {body_text}"
+                    else:
+                        message = base_message
+                    final_category = "GENERAL"
 
-            raise MBError("GENERAL", message, e) from e
+            raise MBError(final_category, message, e) from e
         except URLError as e:
             category = "NETWORK"
             if attempt < max_attempts:
                 if on_retry:
                     on_retry(category)
-                time.sleep(1.0 * (2 ** (attempt - 1)))
+                time.sleep(base_sleep * (2 ** (attempt - 1)))
                 continue
             raise MBError(category, str(e), e) from e
 
