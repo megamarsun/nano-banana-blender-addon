@@ -247,6 +247,20 @@ def _api_call(api_key: str, body: dict) -> dict:
 def _api_call_with_retry(api_key: str, body: dict, on_retry=None) -> dict:
     max_attempts = 3
     attempt = 0
+
+    def _http_error_message(error: HTTPError):
+        body_text = ""
+        try:
+            data = error.read()
+            if data:
+                body_text = data.decode("utf-8", errors="ignore")
+        except Exception:
+            body_text = ""
+        message = f"HTTP {error.code}: {error.reason}" if getattr(error, "code", None) else str(error)
+        if body_text:
+            message = f"{message} - {body_text}"
+        return message, body_text
+
     while True:
         attempt += 1
         try:
@@ -262,9 +276,26 @@ def _api_call_with_retry(api_key: str, body: dict, on_retry=None) -> dict:
                     on_retry(category)
                 time.sleep(1.0 * (2 ** (attempt - 1)))
                 continue
+
+            message, body_text = _http_error_message(e)
             if category:
-                raise MBError(category, str(e), e) from e
-            raise
+                raise MBError(category, message, e) from e
+
+            api_payload = None
+            if body_text:
+                try:
+                    api_payload = json.loads(body_text)
+                except Exception:
+                    api_payload = None
+            if isinstance(api_payload, dict) and "error" in api_payload:
+                err = api_payload["error"] or {}
+                code = err.get("code")
+                status = err.get("status")
+                msg = err.get("message") or body_text
+                formatted = f"{code}/{status} {msg}".strip()
+                raise MBError("API_ERROR", formatted, e) from e
+
+            raise MBError("GENERAL", message, e) from e
         except URLError as e:
             category = "NETWORK"
             if attempt < max_attempts:
