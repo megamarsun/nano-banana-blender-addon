@@ -5,7 +5,7 @@ from bpy.props import StringProperty, BoolProperty, EnumProperty, PointerPropert
 from bpy.types import Operator, Panel, PropertyGroup
 from bpy.app.translations import pgettext_iface as _
 
-API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent"
+API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent"
 
 
 # =========================================================
@@ -80,6 +80,26 @@ class MBProps(PropertyGroup):
         default="",
         subtype='FILE_PATH',
         update=_update_to_rel("input_path_c")
+    )
+
+    aspect_ratio: EnumProperty(
+        name="Aspect Ratio",
+        description="Gemini画像生成時の出力アスペクト比",
+        items=[
+            ('AUTO', "Auto (match input / 1:1)", "入力画像があればそれに合わせ、なければ1:1"),
+            ('1:1', "1:1 Square", "正方形"),
+            ('16:9', "16:9 Landscape", "ワイド"),
+            ('9:16', "9:16 Portrait", "縦長"),
+            ('3:2', "3:2", "3:2"),
+            ('4:5', "4:5", "4:5"),
+            ('CUSTOM', "Custom", "任意指定")
+        ],
+        default='AUTO'
+    )
+    aspect_ratio_custom: StringProperty(
+        name="Custom Aspect Ratio",
+        description="任意のアスペクト比を 16:9 のように入力",
+        default="16:9"
     )
 
     # 手動実行
@@ -226,7 +246,14 @@ def _augment_prompt(user_text: str) -> str:
     base = (user_text or "").strip()
     return (base + ("\n" if base else "") + guard)
 
-def _run_monkey_banana(api_key: str, prompt: str, ref1: str, ref2: str, render_img: str) -> bytes:
+def _build_generation_config(aspect_ratio: str | None) -> dict | None:
+    config = {"responseModalities": ["Image"]}
+    if aspect_ratio:
+        config["imageConfig"] = {"aspectRatio": aspect_ratio}
+    return config
+
+
+def _run_monkey_banana(api_key: str, prompt: str, ref1: str, ref2: str, render_img: str, generation_config: dict | None) -> bytes:
     parts = [{"text": _augment_prompt(prompt)}]
 
     if ref1 and os.path.isfile(ref1):
@@ -239,6 +266,8 @@ def _run_monkey_banana(api_key: str, prompt: str, ref1: str, ref2: str, render_i
     parts.append({"inline_data": {"mime_type": _guess_mime(render_img), "data": _file_to_b64(render_img)}})
 
     body = {"contents": [{"parts": parts}]}
+    if generation_config:
+        body["generationConfig"] = generation_config
     res = _api_call(api_key, body)
 
     if isinstance(res, dict) and "error" in res:
@@ -253,13 +282,13 @@ def _run_monkey_banana(api_key: str, prompt: str, ref1: str, ref2: str, render_i
     return base64.b64decode(img_b64)
 
 
-def _run_worker(api_key: str, prompt: str, ref1: str, ref2: str, render_img: str, q: "queue.Queue", cancel_evt: "threading.Event") -> None:
+def _run_worker(api_key: str, prompt: str, ref1: str, ref2: str, render_img: str, generation_config: dict | None, q: "queue.Queue", cancel_evt: "threading.Event") -> None:
     """バックグラウンドスレッドから API を実行し結果をキューへ送る"""
     try:
         if cancel_evt.is_set():
             q.put({"type": "cancel"})
             return
-        data = _run_monkey_banana(api_key, prompt, ref1, ref2, render_img)
+        data = _run_monkey_banana(api_key, prompt, ref1, ref2, render_img, generation_config)
         if cancel_evt.is_set():
             q.put({"type": "cancel"})
         else:
@@ -308,6 +337,20 @@ class MB_OT_Run(Operator):
         ref1 = _abs(props.input_path_b) if props.input_path_b else ""
         ref2 = _abs(props.input_path_c) if props.input_path_c else ""
 
+        if props.aspect_ratio == 'CUSTOM':
+            aspect_ratio = props.aspect_ratio_custom.strip()
+        elif props.aspect_ratio == 'AUTO':
+            aspect_ratio = None
+        else:
+            aspect_ratio = props.aspect_ratio
+
+        if aspect_ratio and not re.fullmatch(r"\d+:\d+", aspect_ratio):
+            self.report({'ERROR'}, "アスペクト比は 16:9 のように入力してください")
+            mb_log(scene, "ERROR", "アスペクト比は 16:9 のように入力してください")
+            return {'CANCELLED'}
+
+        generation_config = _build_generation_config(aspect_ratio)
+
         out_path = _abs(props.output_path).strip()
         if not out_path:
             base_dir = os.path.dirname(in_a) if os.path.dirname(in_a) else bpy.path.abspath("//")
@@ -333,7 +376,7 @@ class MB_OT_Run(Operator):
         prompt_text = props.prompt_text.as_string() if props.prompt_text else ""
         self._thread = threading.Thread(
             target=_run_worker,
-            args=(api_key, prompt_text, ref1, ref2, in_a, self._queue, self._cancel),
+            args=(api_key, prompt_text, ref1, ref2, in_a, generation_config, self._queue, self._cancel),
             daemon=True,
         )
         self._thread.start()
@@ -511,6 +554,13 @@ class MB_PT_Panel(Panel):
         layout.separator()
         layout.label(text=_("Render (Base) - required"))
         layout.prop(p, "input_path")
+
+        layout.separator()
+        box = layout.box()
+        box.label(text=_("Aspect Ratio"))
+        box.prop(p, "aspect_ratio", text="")
+        if p.aspect_ratio == 'CUSTOM':
+            box.prop(p, "aspect_ratio_custom", text=_("Custom Aspect Ratio"))
 
         layout.separator()
         layout.template_ID(p, "prompt_text", new="mb.new_prompt_text")
