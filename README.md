@@ -13,6 +13,12 @@ Gemini APIの正式版エンドポイントを利用し、アスペクト比指�
 
 生成した画像は `mb_out_01.png`, `mb_out_02.png` のように番号を自動付与して保存され、既存ファイルを上書きしません。リミッター機能はありません。
 
+## インストール
+
+Blender の拡張機能ディレクトリに配置する際は、このリポジトリのルートフォルダ
+`nano-banana-blender-addon` を `nano_banana` にリネームしてからコピーします。
+フォルダ直下には `__init__.py` と `blender_manifest.toml` が存在する必要があります。
+
 ## Release
 
 `python build_release.py` を実行すると、Git管理情報や `README.md` を含まない
